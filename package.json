@@ -1,0 +1,24 @@
+{
+  "name": "dev-knowledge-bot",
+  "version": "1.0.0",
+  "private": true,
+  "packageManager": "pnpm@9.0.0",
+  "scripts": {
+    "dev:web": "pnpm --filter web dev",
+    "dev:api": "vercel dev",
+    "build": "pnpm --filter web build",
+    "db:check": "tsx scripts/db-check.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@vercel/node": "^5.8.2",
+    "dotenv": "^16.4.5",
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.0"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.96.0",
+    "@slack/web-api": "^7.16.0",
+    "postgres": "^3.4.9"
+  }
+}
