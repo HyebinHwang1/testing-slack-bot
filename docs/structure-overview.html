@@ -97,7 +97,7 @@
     /* Overview grid */
     .overview-grid {
       display: grid;
-      grid-template-columns: repeat(3, 1fr);
+      grid-template-columns: repeat(4, 1fr);
       gap: 16px;
     }
     .overview-item {
@@ -124,7 +124,7 @@
     /* Architecture diagram */
     .arch-diagram {
       display: grid;
-      grid-template-columns: 1fr auto 1fr auto 1fr;
+      grid-template-columns: 1fr auto 1fr auto 1fr auto 1fr;
       align-items: center;
       gap: 0;
       padding: 24px;
@@ -295,6 +295,8 @@
     .phase-items { list-style: none; }
     .phase-items li { font-size: 12px; color: var(--muted); padding: 2px 0; }
     .phase-items li::before { content: '·  '; }
+    .phase-items li.done-item { color: var(--accent-green); opacity: 0.8; }
+    .phase-items li.done-item::before { content: '✓  '; }
 
     /* Data model */
     .db-table {
@@ -409,6 +411,11 @@
         <p>@철수 를 멘션하면 Q&A를 감지하고<br/>저장 의도를 구분</p>
       </div>
       <div class="overview-item">
+        <div class="overview-icon">🧠</div>
+        <h3>Claude AI</h3>
+        <p>스레드 Q/A 자동 추출 및<br/>지식베이스 기반 질문 답변</p>
+      </div>
+      <div class="overview-item">
         <div class="overview-icon">⚡️</div>
         <h3>Vercel Serverless</h3>
         <p>API 레이어를 서버리스 함수로<br/>Vercel에 배포</p>
@@ -416,7 +423,7 @@
       <div class="overview-item">
         <div class="overview-icon">🌐</div>
         <h3>React Web</h3>
-        <p>저장된 Q&A를 웹에서 확인하고<br/>검색할 수 있는 페이지</p>
+        <p>저장된 Q&A를 웹에서 확인하고<br/>Markdown으로 렌더링</p>
       </div>
     </div>
   </div>
@@ -437,7 +444,15 @@
         <div class="arch-node">
           <span class="icon">⚡️</span>
           <div class="label" style="color:var(--accent-orange)">Vercel Functions</div>
-          <div class="desc">api/slack/events.ts<br/>api/qa/list.ts</div>
+          <div class="desc">api/slack/events.ts<br/>api/qa/list.ts<br/>api/qa/get.ts</div>
+        </div>
+        <div class="arch-arrow">
+          ↔<span class="caption">API<br/>call</span>
+        </div>
+        <div class="arch-node">
+          <span class="icon">🧠</span>
+          <div class="label" style="color:var(--accent-pink)">Claude API</div>
+          <div class="desc">claude-haiku-4-5<br/>Q/A 추출 + 답변</div>
         </div>
         <div class="arch-arrow">
           ↔<span class="caption">SQL<br/>query</span>
@@ -448,12 +463,12 @@
           <div class="desc">PostgreSQL<br/>qa_items 테이블</div>
         </div>
       </div>
-      <div style="text-align:center; padding-bottom:8px; color:var(--muted); font-size:12px;">↕ GET /api/qa/list</div>
+      <div style="text-align:center; padding-bottom:8px; color:var(--muted); font-size:12px;">↕ GET /api/qa/list &nbsp;·&nbsp; GET /api/qa/get?id=…</div>
       <div style="display:flex; justify-content:center;">
-        <div class="arch-node" style="min-width:200px;">
+        <div class="arch-node" style="min-width:220px;">
           <span class="icon">⚛️</span>
           <div class="label" style="color:var(--accent-blue)">React Frontend</div>
-          <div class="desc">web/src/App.tsx<br/>TanStack Query로 데이터 패치</div>
+          <div class="desc">web/src/App.tsx<br/>목록 · 상세 페이지 (hash routing)<br/>ReactMarkdown 렌더링</div>
         </div>
       </div>
     </div>
@@ -463,20 +478,21 @@
   <div class="section">
     <div class="section-title">디렉토리 구조</div>
     <div class="tree">
-      <div class="tree-item"><span class="tree-folder">📁 melbourne/</span><span class="tree-comment">← 프로젝트 루트</span></div>
+      <div class="tree-item"><span class="tree-folder">📁 nashville/</span><span class="tree-comment">← 프로젝트 루트</span></div>
 
       <div class="tree-item tree-indent-1"><span class="tree-folder">📁 api/</span><span class="tree-comment">Vercel Serverless Functions</span></div>
       <div class="tree-item tree-indent-2"><span class="tree-folder">📁 _lib/</span><span class="tree-comment">공유 유틸 (API 내부 전용)</span></div>
       <div class="tree-item tree-indent-3"><span class="tree-file-ts">📄 db.ts</span><span class="tree-comment">PostgreSQL 클라이언트 + QaItem 타입</span></div>
-      <div class="tree-item tree-indent-3"><span class="tree-file-ts">📄 slack-verify.ts</span><span class="tree-comment">Slack 서명 검증</span></div>
+      <div class="tree-item tree-indent-3"><span class="tree-file-ts">📄 slack-verify.ts</span><span class="tree-comment">Slack 서명 검증 (HMAC-SHA256)</span></div>
       <div class="tree-item tree-indent-2"><span class="tree-folder">📁 slack/</span></div>
-      <div class="tree-item tree-indent-3"><span class="tree-file-ts">📄 events.ts</span><span class="tree-comment">POST /api/slack/events ← 핵심 봇 로직</span></div>
+      <div class="tree-item tree-indent-3"><span class="tree-file-ts">📄 events.ts</span><span class="tree-comment">POST /api/slack/events ← 핵심 봇 로직 + Claude 연동</span></div>
       <div class="tree-item tree-indent-2"><span class="tree-folder">📁 qa/</span></div>
       <div class="tree-item tree-indent-3"><span class="tree-file-ts">📄 list.ts</span><span class="tree-comment">GET /api/qa/list</span></div>
+      <div class="tree-item tree-indent-3"><span class="tree-file-ts">📄 get.ts</span><span class="tree-comment">GET /api/qa/get?id=… · 조회수 +1 (UPDATE … RETURNING)</span></div>
 
       <div class="tree-item tree-indent-1" style="margin-top:6px"><span class="tree-folder">📁 web/</span><span class="tree-comment">React + Vite 프론트엔드</span></div>
       <div class="tree-item tree-indent-2"><span class="tree-folder">📁 src/</span></div>
-      <div class="tree-item tree-indent-3"><span class="tree-file-tsx">📄 App.tsx</span><span class="tree-comment">Q&A 목록 페이지 (메인 UI)</span></div>
+      <div class="tree-item tree-indent-3"><span class="tree-file-tsx">📄 App.tsx</span><span class="tree-comment">목록 + 상세 페이지 · hash 라우터 (useHashRoute)</span></div>
       <div class="tree-item tree-indent-3"><span class="tree-file-tsx">📄 main.tsx</span><span class="tree-comment">React 진입점</span></div>
       <div class="tree-item tree-indent-3"><span class="tree-file-other">📄 index.css</span><span class="tree-comment">Tailwind v4 import</span></div>
       <div class="tree-item tree-indent-2"><span class="tree-file-ts">📄 vite.config.ts</span><span class="tree-comment">/api/* → localhost:3000 프록시 설정</span></div>
@@ -497,12 +513,17 @@
         <div class="route-item">
           <span class="method method-post">POST</span>
           <span class="route-path">/api/slack/events</span>
-          <span class="route-desc">Slack 이벤트 수신 (멘션 감지, 응답 발송)</span>
+          <span class="route-desc">Slack 이벤트 수신 (멘션 감지, Claude 연동, 저장/답변 발송)</span>
         </div>
         <div class="route-item">
           <span class="method method-get">GET</span>
           <span class="route-path">/api/qa/list</span>
           <span class="route-desc">Q&A 목록 조회 — <code style="font-size:11px;color:var(--accent-blue)">{ items: QaItem[] }</code> 반환</span>
+        </div>
+        <div class="route-item">
+          <span class="method method-get">GET</span>
+          <span class="route-path">/api/qa/get?id=…</span>
+          <span class="route-desc">Q&A 상세 조회 + 조회수 +1 — <code style="font-size:11px;color:var(--accent-blue)">{ item: QaItem }</code> 반환</span>
         </div>
       </div>
     </div>
@@ -513,52 +534,66 @@
     <div class="section-title">Slack 이벤트 처리 흐름</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
       <div class="card">
-        <div style="font-size:12px;font-weight:700;color:var(--accent-orange);margin-bottom:14px;">💬 메인 채널에서 멘션</div>
+        <div style="font-size:12px;font-weight:700;color:var(--accent-orange);margin-bottom:14px;">💬 메인 채널에서 멘션 — 질문 답변</div>
         <div class="flow">
           <div class="flow-step">
             <div class="flow-connector">
               <div class="flow-circle" style="background:rgba(251,146,60,0.2);color:var(--accent-orange);">1</div>
               <div class="flow-line"></div>
             </div>
-            <div class="flow-content"><h4>Slack 이벤트 수신</h4><p>POST /api/slack/events</p></div>
+            <div class="flow-content"><h4>Slack 이벤트 수신</h4><p>POST /api/slack/events<br/>서명 검증 (HMAC-SHA256, 5분 replay 방지)</p></div>
           </div>
           <div class="flow-step">
             <div class="flow-connector">
               <div class="flow-circle" style="background:rgba(251,146,60,0.2);color:var(--accent-orange);">2</div>
               <div class="flow-line"></div>
             </div>
-            <div class="flow-content"><h4>서명 검증</h4><p>HMAC-SHA256, 5분 replay 방지</p></div>
+            <div class="flow-content"><h4>DB 지식베이스 조회</h4><p>qa_items 최근 50건 SELECT</p></div>
           </div>
           <div class="flow-step">
             <div class="flow-connector">
               <div class="flow-circle" style="background:rgba(251,146,60,0.2);color:var(--accent-orange);">3</div>
+              <div class="flow-line"></div>
             </div>
-            <div class="flow-content"><h4>❓ 질문 의도 응답</h4><p>thread_ts 없음 → 질문으로 인식</p></div>
+            <div class="flow-content"><h4>Claude API 답변 생성</h4><p>claude-haiku-4-5 · 지식베이스 컨텍스트 주입<br/>없으면 "아직 저장된 답이 없어요" 응답</p></div>
+          </div>
+          <div class="flow-step">
+            <div class="flow-connector">
+              <div class="flow-circle" style="background:rgba(251,146,60,0.2);color:var(--accent-orange);">4</div>
+            </div>
+            <div class="flow-content"><h4>Slack 스레드 답변 발송</h4><p>질문 원문 + AI 답변 thread_ts로 발송</p></div>
           </div>
         </div>
       </div>
       <div class="card">
-        <div style="font-size:12px;font-weight:700;color:var(--accent-green);margin-bottom:14px;">🧵 스레드에서 멘션</div>
+        <div style="font-size:12px;font-weight:700;color:var(--accent-green);margin-bottom:14px;">🧵 스레드에서 멘션 — Q/A 저장</div>
         <div class="flow">
           <div class="flow-step">
             <div class="flow-connector">
               <div class="flow-circle" style="background:rgba(74,222,128,0.2);color:var(--accent-green);">1</div>
               <div class="flow-line"></div>
             </div>
-            <div class="flow-content"><h4>Slack 이벤트 수신</h4><p>POST /api/slack/events</p></div>
+            <div class="flow-content"><h4>스레드 메시지 fetch</h4><p>conversations.replies로 전체 스레드 수집<br/>봇 멘션 노이즈 제거</p></div>
           </div>
           <div class="flow-step">
             <div class="flow-connector">
               <div class="flow-circle" style="background:rgba(74,222,128,0.2);color:var(--accent-green);">2</div>
               <div class="flow-line"></div>
             </div>
-            <div class="flow-content"><h4>스레드 감지</h4><p>thread_ts 있음 → 저장 의도</p></div>
+            <div class="flow-content"><h4>Claude로 Q/A 추출</h4><p>claude-haiku-4-5 · JSON 형식 출력<br/>{"question": "…", "answer": "…(Markdown)"}</p></div>
           </div>
           <div class="flow-step">
             <div class="flow-connector">
               <div class="flow-circle" style="background:rgba(74,222,128,0.2);color:var(--accent-green);">3</div>
+              <div class="flow-line"></div>
             </div>
-            <div class="flow-content"><h4>💾 저장 의도 응답</h4><p>→ Phase 4에서 Claude API로 Q&A 추출</p></div>
+            <div class="flow-content"><h4>DB INSERT</h4><p>qa_items에 question/answer/author 저장</p></div>
+          </div>
+          <div class="flow-step">
+            <div class="flow-connector">
+              <div class="flow-circle" style="background:rgba(74,222,128,0.2);color:var(--accent-green);">4</div>
+            </div>
+            <div class="flow-content"><h4>저장 완료 답글</h4><p>Q/A 요약 + 웹 링크(id 앞 8자리) 발송</p></div>
           </div>
         </div>
       </div>
@@ -576,9 +611,8 @@
             <span class="tag tag-blue">React 19</span>
             <span class="tag tag-blue">Vite 8</span>
             <span class="tag tag-purple">TailwindCSS v4</span>
-            <span class="tag tag-purple">TanStack Query v5</span>
-            <span class="tag tag-purple">TanStack Router v1</span>
             <span class="tag tag-pink">react-markdown</span>
+            <span class="tag tag-purple">Hash Router (custom)</span>
           </div>
         </div>
         <div class="tech-group">
@@ -596,7 +630,6 @@
           <div class="tech-tags">
             <span class="tag tag-orange">pnpm workspaces</span>
             <span class="tag tag-blue">Vercel</span>
-            <span class="tag tag-green">GitHub Actions</span>
           </div>
         </div>
         <div class="tech-group" style="margin-top:16px;">
@@ -624,27 +657,27 @@
       <div class="db-row">
         <span class="db-col">question</span>
         <span class="db-type">TEXT</span>
-        <span class="db-note">Q&A 질문 내용</span>
+        <span class="db-note">Q&A 질문 내용 (Claude 추출)</span>
       </div>
       <div class="db-row">
         <span class="db-col">answer</span>
         <span class="db-type">TEXT</span>
-        <span class="db-note">답변 (Markdown 포함 가능)</span>
+        <span class="db-note">답변 Markdown (Claude 추출)</span>
       </div>
       <div class="db-row">
         <span class="db-col">author_slack_id</span>
         <span class="db-type">VARCHAR</span>
-        <span class="db-note">질문 작성자 Slack ID</span>
+        <span class="db-note">저장 트리거한 사용자 Slack ID</span>
       </div>
       <div class="db-row">
         <span class="db-col">curator_slack_id</span>
         <span class="db-type">VARCHAR</span>
-        <span class="db-note">답변 작성자 Slack ID</span>
+        <span class="db-note">큐레이터 Slack ID (현재 author와 동일)</span>
       </div>
       <div class="db-row">
         <span class="db-col">view_count</span>
         <span class="db-type">INT</span>
-        <span class="db-note">조회수 (default: 0)</span>
+        <span class="db-note">조회수 — GET /api/qa/get 호출 시 +1 (default: 0)</span>
       </div>
       <div class="db-row">
         <span class="db-col">is_deleted</span>
@@ -670,36 +703,38 @@
         </div>
         <div class="phase-title">모노레포 기반 구축</div>
         <ul class="phase-items">
-          <li>pnpm 워크스페이스 설정</li>
-          <li>Vite + React + Tailwind 초기화</li>
-          <li>Supabase DB 연결 검증</li>
-          <li>더미 데이터 시딩</li>
+          <li class="done-item">pnpm 워크스페이스 설정</li>
+          <li class="done-item">Vite + React + Tailwind 초기화</li>
+          <li class="done-item">Supabase DB 연결 검증</li>
+          <li class="done-item">더미 데이터 시딩</li>
+        </ul>
+      </div>
+      <div class="phase-card done">
+        <div class="phase-header">
+          <span class="phase-num">PHASE 3</span>
+          <span class="phase-status status-done">완료</span>
+        </div>
+        <div class="phase-title">Slack Bot + Claude 연동</div>
+        <ul class="phase-items">
+          <li class="done-item">app_mention 이벤트 핸들러</li>
+          <li class="done-item">질문 vs 저장 의도 분기</li>
+          <li class="done-item">Claude로 Q/A 자동 추출 (저장)</li>
+          <li class="done-item">Claude로 지식베이스 기반 답변 (질문)</li>
+          <li class="done-item">Q&A 목록 + 상세 API</li>
+          <li class="done-item">프론트 목록 · 상세 페이지 UI</li>
         </ul>
       </div>
       <div class="phase-card active">
         <div class="phase-header">
-          <span class="phase-num">PHASE 3</span>
+          <span class="phase-num">PHASE 4</span>
           <span class="phase-status status-active">진행 중</span>
         </div>
-        <div class="phase-title">Slack Hello World</div>
+        <div class="phase-title">검색 & 리더보드</div>
         <ul class="phase-items">
-          <li>app_mention 이벤트 핸들러</li>
-          <li>질문 vs 저장 의도 분기</li>
-          <li>Q&A 목록 API 완성</li>
-          <li>프론트 목록 페이지 UI</li>
-        </ul>
-      </div>
-      <div class="phase-card planned">
-        <div class="phase-header">
-          <span class="phase-num">PHASE 4</span>
-          <span class="phase-status status-planned">예정</span>
-        </div>
-        <div class="phase-title">AI 통합 (Claude API)</div>
-        <ul class="phase-items">
-          <li>스레드에서 Q&A 자동 추출</li>
-          <li>Markdown 렌더링 상세 페이지</li>
           <li>전문 검색 (pg_trgm)</li>
           <li>기여자 리더보드</li>
+          <li>태그 / 카테고리</li>
+          <li>Vercel 프로덕션 배포</li>
         </ul>
       </div>
     </div>
@@ -755,18 +790,18 @@
         </div>
         <div class="env-item">
           <span class="env-key">ANTHROPIC_API_KEY</span>
-          <span class="env-desc">Claude API 키 (Phase 4에서 사용)</span>
+          <span class="env-desc">Claude API 키 — Q/A 추출 및 질문 답변에 사용 (claude-haiku-4-5)</span>
         </div>
         <div class="env-item">
           <span class="env-key">SITE_URL</span>
-          <span class="env-desc">배포 URL (https://dev-knowledge-bot.vercel.app)</span>
+          <span class="env-desc">배포 URL — 저장 완료 메시지에 포함 (예: https://dev-knowledge-bot.vercel.app)</span>
         </div>
       </div>
     </div>
   </div>
 
   <div class="footer">
-    dev-knowledge-bot · Phase 3 · 2026-05-19
+    dev-knowledge-bot · nashville · Phase 3 완료 / Phase 4 진행 중 · 2026-05-19
   </div>
 
 </div>
