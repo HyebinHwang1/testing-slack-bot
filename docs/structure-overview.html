@@ -1,0 +1,774 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>dev-knowledge-bot 구조 설명</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0f172a;
+      --surface: #1e293b;
+      --surface2: #2d3748;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent-blue: #60a5fa;
+      --accent-purple: #a78bfa;
+      --accent-green: #4ade80;
+      --accent-orange: #fb923c;
+      --accent-pink: #f472b6;
+      --accent-yellow: #facc15;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 14px;
+      line-height: 1.6;
+      padding: 40px 20px;
+    }
+
+    .container {
+      max-width: 960px;
+      margin: 0 auto;
+    }
+
+    /* Header */
+    .header {
+      text-align: center;
+      margin-bottom: 56px;
+    }
+    .header .badge {
+      display: inline-block;
+      background: rgba(96, 165, 250, 0.15);
+      color: var(--accent-blue);
+      border: 1px solid rgba(96, 165, 250, 0.3);
+      padding: 4px 12px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      margin-bottom: 16px;
+    }
+    .header h1 {
+      font-size: 32px;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+    .header h1 span { color: var(--accent-blue); }
+    .header p {
+      color: var(--muted);
+      font-size: 15px;
+    }
+
+    /* Section */
+    .section {
+      margin-bottom: 48px;
+    }
+    .section-title {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .section-title::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: var(--border);
+    }
+
+    /* Cards */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+    }
+
+    /* Overview grid */
+    .overview-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+    }
+    .overview-item {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      text-align: center;
+    }
+    .overview-icon {
+      font-size: 28px;
+      margin-bottom: 8px;
+    }
+    .overview-item h3 {
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+    .overview-item p {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    /* Architecture diagram */
+    .arch-diagram {
+      display: grid;
+      grid-template-columns: 1fr auto 1fr auto 1fr;
+      align-items: center;
+      gap: 0;
+      padding: 24px;
+    }
+
+    .arch-node {
+      background: var(--surface2);
+      border-radius: 10px;
+      padding: 16px;
+      text-align: center;
+      border: 1px solid var(--border);
+    }
+    .arch-node .icon { font-size: 24px; display: block; margin-bottom: 6px; }
+    .arch-node .label {
+      font-size: 12px;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+    .arch-node .desc { font-size: 11px; color: var(--muted); }
+
+    .arch-arrow {
+      text-align: center;
+      padding: 0 8px;
+      color: var(--muted);
+      font-size: 18px;
+    }
+    .arch-arrow .caption { font-size: 10px; color: var(--muted); display: block; margin-top: 4px; }
+
+    /* Directory tree */
+    .tree {
+      background: var(--surface2);
+      border-radius: 10px;
+      padding: 20px 24px;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      font-size: 13px;
+      line-height: 2;
+    }
+    .tree-item { display: flex; align-items: center; gap: 6px; }
+    .tree-indent-1 { padding-left: 20px; }
+    .tree-indent-2 { padding-left: 40px; }
+    .tree-indent-3 { padding-left: 60px; }
+    .tree-folder { color: var(--accent-yellow); }
+    .tree-file-ts { color: var(--accent-blue); }
+    .tree-file-tsx { color: var(--accent-purple); }
+    .tree-file-json { color: var(--accent-orange); }
+    .tree-file-other { color: var(--muted); }
+    .tree-comment { color: var(--muted); font-size: 11px; margin-left: auto; }
+
+    /* API routes */
+    .route-list { display: flex; flex-direction: column; gap: 12px; }
+    .route-item {
+      display: grid;
+      grid-template-columns: 60px 240px 1fr;
+      align-items: center;
+      gap: 12px;
+      background: var(--surface2);
+      border-radius: 8px;
+      padding: 12px 16px;
+    }
+    .method {
+      font-family: 'SF Mono', monospace;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 3px 8px;
+      border-radius: 5px;
+      text-align: center;
+    }
+    .method-post { background: rgba(251, 146, 60, 0.2); color: var(--accent-orange); }
+    .method-get { background: rgba(74, 222, 128, 0.2); color: var(--accent-green); }
+    .route-path {
+      font-family: 'SF Mono', monospace;
+      font-size: 12px;
+      color: var(--accent-blue);
+    }
+    .route-desc { font-size: 12px; color: var(--muted); }
+
+    /* Flow diagram */
+    .flow {
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+    }
+    .flow-step {
+      display: flex;
+      align-items: flex-start;
+      gap: 16px;
+    }
+    .flow-connector {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      width: 36px;
+      flex-shrink: 0;
+    }
+    .flow-circle {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+    .flow-line {
+      width: 2px;
+      height: 28px;
+      background: var(--border);
+    }
+    .flow-content {
+      padding: 6px 0 24px;
+    }
+    .flow-content h4 { font-size: 13px; font-weight: 600; margin-bottom: 3px; }
+    .flow-content p { font-size: 12px; color: var(--muted); }
+
+    /* Tech stack */
+    .tech-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+    .tech-group { }
+    .tech-group h3 {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--muted);
+      margin-bottom: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .tech-tags { display: flex; flex-wrap: wrap; gap: 8px; }
+    .tag {
+      font-size: 12px;
+      font-weight: 500;
+      padding: 4px 10px;
+      border-radius: 6px;
+    }
+    .tag-blue { background: rgba(96, 165, 250, 0.15); color: var(--accent-blue); }
+    .tag-purple { background: rgba(167, 139, 250, 0.15); color: var(--accent-purple); }
+    .tag-green { background: rgba(74, 222, 128, 0.15); color: var(--accent-green); }
+    .tag-orange { background: rgba(251, 146, 60, 0.15); color: var(--accent-orange); }
+    .tag-pink { background: rgba(244, 114, 182, 0.15); color: var(--accent-pink); }
+
+    /* Phase timeline */
+    .phase-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+    .phase-card {
+      background: var(--surface2);
+      border-radius: 10px;
+      padding: 16px;
+      border: 1px solid var(--border);
+    }
+    .phase-card.done { border-color: rgba(74, 222, 128, 0.3); }
+    .phase-card.active { border-color: rgba(96, 165, 250, 0.4); background: rgba(96, 165, 250, 0.05); }
+    .phase-card.planned { opacity: 0.6; }
+    .phase-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+    .phase-num { font-size: 11px; font-weight: 700; color: var(--muted); }
+    .phase-status {
+      font-size: 10px;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 10px;
+    }
+    .status-done { background: rgba(74, 222, 128, 0.2); color: var(--accent-green); }
+    .status-active { background: rgba(96, 165, 250, 0.2); color: var(--accent-blue); }
+    .status-planned { background: var(--surface); color: var(--muted); }
+    .phase-title { font-size: 13px; font-weight: 600; margin-bottom: 8px; }
+    .phase-items { list-style: none; }
+    .phase-items li { font-size: 12px; color: var(--muted); padding: 2px 0; }
+    .phase-items li::before { content: '·  '; }
+
+    /* Data model */
+    .db-table {
+      background: var(--surface2);
+      border-radius: 10px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+    }
+    .db-header {
+      background: rgba(96, 165, 250, 0.1);
+      padding: 10px 16px;
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--accent-blue);
+      font-family: 'SF Mono', monospace;
+      border-bottom: 1px solid var(--border);
+    }
+    .db-row {
+      display: grid;
+      grid-template-columns: 180px 140px 1fr;
+      gap: 16px;
+      padding: 8px 16px;
+      border-bottom: 1px solid rgba(51, 65, 85, 0.5);
+      align-items: center;
+    }
+    .db-row:last-child { border-bottom: none; }
+    .db-col { font-family: 'SF Mono', monospace; font-size: 12px; color: var(--accent-purple); }
+    .db-type { font-family: 'SF Mono', monospace; font-size: 11px; color: var(--accent-orange); }
+    .db-note { font-size: 11px; color: var(--muted); }
+
+    /* Dev setup */
+    .setup-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+    .setup-card {
+      background: var(--surface2);
+      border-radius: 10px;
+      padding: 16px;
+      border: 1px solid var(--border);
+    }
+    .terminal-label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+    .terminal-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+    }
+    .t1 { background: #ef4444; }
+    .t2 { background: #facc15; }
+    .t3 { background: #4ade80; }
+    .terminal-label span { font-size: 11px; font-weight: 600; color: var(--muted); }
+    .cmd {
+      font-family: 'SF Mono', monospace;
+      font-size: 12px;
+      background: var(--bg);
+      padding: 8px 12px;
+      border-radius: 6px;
+      margin-bottom: 8px;
+    }
+    .cmd span { color: var(--accent-green); }
+    .setup-desc { font-size: 11px; color: var(--muted); }
+
+    /* Env vars */
+    .env-list { display: flex; flex-direction: column; gap: 8px; }
+    .env-item {
+      display: grid;
+      grid-template-columns: 200px 1fr;
+      gap: 12px;
+      align-items: center;
+      padding: 8px 12px;
+      background: var(--surface2);
+      border-radius: 6px;
+    }
+    .env-key {
+      font-family: 'SF Mono', monospace;
+      font-size: 12px;
+      color: var(--accent-yellow);
+    }
+    .env-desc { font-size: 12px; color: var(--muted); }
+
+    /* Footer */
+    .footer {
+      margin-top: 56px;
+      padding-top: 24px;
+      border-top: 1px solid var(--border);
+      text-align: center;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    /* Highlight */
+    em { font-style: normal; color: var(--text); font-weight: 500; }
+  </style>
+</head>
+<body>
+<div class="container">
+
+  <!-- Header -->
+  <div class="header">
+    <div class="badge">FRONTEND TEAM OVERVIEW</div>
+    <h1>🤖 <span>dev-knowledge-bot</span> 구조 설명</h1>
+    <p>Slack 멘션으로 팀 지식을 저장하고, 웹에서 검색하는 지식 베이스 봇</p>
+  </div>
+
+  <!-- Overview -->
+  <div class="section">
+    <div class="section-title">한 눈에 보기</div>
+    <div class="overview-grid">
+      <div class="overview-item">
+        <div class="overview-icon">💬</div>
+        <h3>Slack Bot</h3>
+        <p>@철수 를 멘션하면 Q&A를 감지하고<br/>저장 의도를 구분</p>
+      </div>
+      <div class="overview-item">
+        <div class="overview-icon">⚡️</div>
+        <h3>Vercel Serverless</h3>
+        <p>API 레이어를 서버리스 함수로<br/>Vercel에 배포</p>
+      </div>
+      <div class="overview-item">
+        <div class="overview-icon">🌐</div>
+        <h3>React Web</h3>
+        <p>저장된 Q&A를 웹에서 확인하고<br/>검색할 수 있는 페이지</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Architecture -->
+  <div class="section">
+    <div class="section-title">전체 아키텍처</div>
+    <div class="card">
+      <div class="arch-diagram">
+        <div class="arch-node">
+          <span class="icon">💬</span>
+          <div class="label" style="color:var(--accent-purple)">Slack</div>
+          <div class="desc">@철수 멘션<br/>Webhook 발송</div>
+        </div>
+        <div class="arch-arrow">
+          →<span class="caption">POST<br/>webhook</span>
+        </div>
+        <div class="arch-node">
+          <span class="icon">⚡️</span>
+          <div class="label" style="color:var(--accent-orange)">Vercel Functions</div>
+          <div class="desc">api/slack/events.ts<br/>api/qa/list.ts</div>
+        </div>
+        <div class="arch-arrow">
+          ↔<span class="caption">SQL<br/>query</span>
+        </div>
+        <div class="arch-node">
+          <span class="icon">🗄️</span>
+          <div class="label" style="color:var(--accent-green)">Supabase</div>
+          <div class="desc">PostgreSQL<br/>qa_items 테이블</div>
+        </div>
+      </div>
+      <div style="text-align:center; padding-bottom:8px; color:var(--muted); font-size:12px;">↕ GET /api/qa/list</div>
+      <div style="display:flex; justify-content:center;">
+        <div class="arch-node" style="min-width:200px;">
+          <span class="icon">⚛️</span>
+          <div class="label" style="color:var(--accent-blue)">React Frontend</div>
+          <div class="desc">web/src/App.tsx<br/>TanStack Query로 데이터 패치</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Directory structure -->
+  <div class="section">
+    <div class="section-title">디렉토리 구조</div>
+    <div class="tree">
+      <div class="tree-item"><span class="tree-folder">📁 melbourne/</span><span class="tree-comment">← 프로젝트 루트</span></div>
+
+      <div class="tree-item tree-indent-1"><span class="tree-folder">📁 api/</span><span class="tree-comment">Vercel Serverless Functions</span></div>
+      <div class="tree-item tree-indent-2"><span class="tree-folder">📁 _lib/</span><span class="tree-comment">공유 유틸 (API 내부 전용)</span></div>
+      <div class="tree-item tree-indent-3"><span class="tree-file-ts">📄 db.ts</span><span class="tree-comment">PostgreSQL 클라이언트 + QaItem 타입</span></div>
+      <div class="tree-item tree-indent-3"><span class="tree-file-ts">📄 slack-verify.ts</span><span class="tree-comment">Slack 서명 검증</span></div>
+      <div class="tree-item tree-indent-2"><span class="tree-folder">📁 slack/</span></div>
+      <div class="tree-item tree-indent-3"><span class="tree-file-ts">📄 events.ts</span><span class="tree-comment">POST /api/slack/events ← 핵심 봇 로직</span></div>
+      <div class="tree-item tree-indent-2"><span class="tree-folder">📁 qa/</span></div>
+      <div class="tree-item tree-indent-3"><span class="tree-file-ts">📄 list.ts</span><span class="tree-comment">GET /api/qa/list</span></div>
+
+      <div class="tree-item tree-indent-1" style="margin-top:6px"><span class="tree-folder">📁 web/</span><span class="tree-comment">React + Vite 프론트엔드</span></div>
+      <div class="tree-item tree-indent-2"><span class="tree-folder">📁 src/</span></div>
+      <div class="tree-item tree-indent-3"><span class="tree-file-tsx">📄 App.tsx</span><span class="tree-comment">Q&A 목록 페이지 (메인 UI)</span></div>
+      <div class="tree-item tree-indent-3"><span class="tree-file-tsx">📄 main.tsx</span><span class="tree-comment">React 진입점</span></div>
+      <div class="tree-item tree-indent-3"><span class="tree-file-other">📄 index.css</span><span class="tree-comment">Tailwind v4 import</span></div>
+      <div class="tree-item tree-indent-2"><span class="tree-file-ts">📄 vite.config.ts</span><span class="tree-comment">/api/* → localhost:3000 프록시 설정</span></div>
+
+      <div class="tree-item tree-indent-1" style="margin-top:6px"><span class="tree-folder">📁 scripts/</span><span class="tree-comment">개발 유틸리티</span></div>
+      <div class="tree-item tree-indent-2"><span class="tree-file-ts">📄 db-check.ts</span><span class="tree-comment">DB 연결 확인</span></div>
+
+      <div class="tree-item tree-indent-1" style="margin-top:6px"><span class="tree-file-json">📄 package.json</span><span class="tree-comment">pnpm 워크스페이스 루트</span></div>
+      <div class="tree-item tree-indent-1"><span class="tree-file-json">📄 vercel.json</span><span class="tree-comment">배포 설정 (빌드, 라우팅)</span></div>
+    </div>
+  </div>
+
+  <!-- API Routes -->
+  <div class="section">
+    <div class="section-title">API 엔드포인트</div>
+    <div class="card">
+      <div class="route-list">
+        <div class="route-item">
+          <span class="method method-post">POST</span>
+          <span class="route-path">/api/slack/events</span>
+          <span class="route-desc">Slack 이벤트 수신 (멘션 감지, 응답 발송)</span>
+        </div>
+        <div class="route-item">
+          <span class="method method-get">GET</span>
+          <span class="route-path">/api/qa/list</span>
+          <span class="route-desc">Q&A 목록 조회 — <code style="font-size:11px;color:var(--accent-blue)">{ items: QaItem[] }</code> 반환</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Slack Event Flow -->
+  <div class="section">
+    <div class="section-title">Slack 이벤트 처리 흐름</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+      <div class="card">
+        <div style="font-size:12px;font-weight:700;color:var(--accent-orange);margin-bottom:14px;">💬 메인 채널에서 멘션</div>
+        <div class="flow">
+          <div class="flow-step">
+            <div class="flow-connector">
+              <div class="flow-circle" style="background:rgba(251,146,60,0.2);color:var(--accent-orange);">1</div>
+              <div class="flow-line"></div>
+            </div>
+            <div class="flow-content"><h4>Slack 이벤트 수신</h4><p>POST /api/slack/events</p></div>
+          </div>
+          <div class="flow-step">
+            <div class="flow-connector">
+              <div class="flow-circle" style="background:rgba(251,146,60,0.2);color:var(--accent-orange);">2</div>
+              <div class="flow-line"></div>
+            </div>
+            <div class="flow-content"><h4>서명 검증</h4><p>HMAC-SHA256, 5분 replay 방지</p></div>
+          </div>
+          <div class="flow-step">
+            <div class="flow-connector">
+              <div class="flow-circle" style="background:rgba(251,146,60,0.2);color:var(--accent-orange);">3</div>
+            </div>
+            <div class="flow-content"><h4>❓ 질문 의도 응답</h4><p>thread_ts 없음 → 질문으로 인식</p></div>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div style="font-size:12px;font-weight:700;color:var(--accent-green);margin-bottom:14px;">🧵 스레드에서 멘션</div>
+        <div class="flow">
+          <div class="flow-step">
+            <div class="flow-connector">
+              <div class="flow-circle" style="background:rgba(74,222,128,0.2);color:var(--accent-green);">1</div>
+              <div class="flow-line"></div>
+            </div>
+            <div class="flow-content"><h4>Slack 이벤트 수신</h4><p>POST /api/slack/events</p></div>
+          </div>
+          <div class="flow-step">
+            <div class="flow-connector">
+              <div class="flow-circle" style="background:rgba(74,222,128,0.2);color:var(--accent-green);">2</div>
+              <div class="flow-line"></div>
+            </div>
+            <div class="flow-content"><h4>스레드 감지</h4><p>thread_ts 있음 → 저장 의도</p></div>
+          </div>
+          <div class="flow-step">
+            <div class="flow-connector">
+              <div class="flow-circle" style="background:rgba(74,222,128,0.2);color:var(--accent-green);">3</div>
+            </div>
+            <div class="flow-content"><h4>💾 저장 의도 응답</h4><p>→ Phase 4에서 Claude API로 Q&A 추출</p></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tech Stack -->
+  <div class="section">
+    <div class="section-title">기술 스택</div>
+    <div class="card">
+      <div class="tech-grid">
+        <div class="tech-group">
+          <h3>Frontend (web/)</h3>
+          <div class="tech-tags">
+            <span class="tag tag-blue">React 19</span>
+            <span class="tag tag-blue">Vite 8</span>
+            <span class="tag tag-purple">TailwindCSS v4</span>
+            <span class="tag tag-purple">TanStack Query v5</span>
+            <span class="tag tag-purple">TanStack Router v1</span>
+            <span class="tag tag-pink">react-markdown</span>
+          </div>
+        </div>
+        <div class="tech-group">
+          <h3>Backend (api/)</h3>
+          <div class="tech-tags">
+            <span class="tag tag-orange">Vercel Serverless</span>
+            <span class="tag tag-green">Supabase PostgreSQL</span>
+            <span class="tag tag-green">@slack/web-api</span>
+            <span class="tag tag-blue">@anthropic-ai/sdk</span>
+            <span class="tag tag-orange">TypeScript</span>
+          </div>
+        </div>
+        <div class="tech-group" style="margin-top:16px;">
+          <h3>패키지 매니저 / 배포</h3>
+          <div class="tech-tags">
+            <span class="tag tag-orange">pnpm workspaces</span>
+            <span class="tag tag-blue">Vercel</span>
+            <span class="tag tag-green">GitHub Actions</span>
+          </div>
+        </div>
+        <div class="tech-group" style="margin-top:16px;">
+          <h3>개발 도구</h3>
+          <div class="tech-tags">
+            <span class="tag tag-purple">ngrok (Slack webhook)</span>
+            <span class="tag tag-blue">tsx (스크립트 실행)</span>
+            <span class="tag tag-pink">ESLint</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Data Model -->
+  <div class="section">
+    <div class="section-title">데이터 모델 (qa_items)</div>
+    <div class="db-table">
+      <div class="db-header">🗄️ qa_items</div>
+      <div class="db-row">
+        <span class="db-col">id</span>
+        <span class="db-type">VARCHAR</span>
+        <span class="db-note">Primary key</span>
+      </div>
+      <div class="db-row">
+        <span class="db-col">question</span>
+        <span class="db-type">TEXT</span>
+        <span class="db-note">Q&A 질문 내용</span>
+      </div>
+      <div class="db-row">
+        <span class="db-col">answer</span>
+        <span class="db-type">TEXT</span>
+        <span class="db-note">답변 (Markdown 포함 가능)</span>
+      </div>
+      <div class="db-row">
+        <span class="db-col">author_slack_id</span>
+        <span class="db-type">VARCHAR</span>
+        <span class="db-note">질문 작성자 Slack ID</span>
+      </div>
+      <div class="db-row">
+        <span class="db-col">curator_slack_id</span>
+        <span class="db-type">VARCHAR</span>
+        <span class="db-note">답변 작성자 Slack ID</span>
+      </div>
+      <div class="db-row">
+        <span class="db-col">view_count</span>
+        <span class="db-type">INT</span>
+        <span class="db-note">조회수 (default: 0)</span>
+      </div>
+      <div class="db-row">
+        <span class="db-col">is_deleted</span>
+        <span class="db-type">BOOLEAN</span>
+        <span class="db-note">소프트 딜리트 (default: false)</span>
+      </div>
+      <div class="db-row">
+        <span class="db-col">created_at / updated_at</span>
+        <span class="db-type">TIMESTAMP</span>
+        <span class="db-note">생성/수정 시각</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Development Phases -->
+  <div class="section">
+    <div class="section-title">개발 단계</div>
+    <div class="phase-grid">
+      <div class="phase-card done">
+        <div class="phase-header">
+          <span class="phase-num">PHASE 2</span>
+          <span class="phase-status status-done">완료</span>
+        </div>
+        <div class="phase-title">모노레포 기반 구축</div>
+        <ul class="phase-items">
+          <li>pnpm 워크스페이스 설정</li>
+          <li>Vite + React + Tailwind 초기화</li>
+          <li>Supabase DB 연결 검증</li>
+          <li>더미 데이터 시딩</li>
+        </ul>
+      </div>
+      <div class="phase-card active">
+        <div class="phase-header">
+          <span class="phase-num">PHASE 3</span>
+          <span class="phase-status status-active">진행 중</span>
+        </div>
+        <div class="phase-title">Slack Hello World</div>
+        <ul class="phase-items">
+          <li>app_mention 이벤트 핸들러</li>
+          <li>질문 vs 저장 의도 분기</li>
+          <li>Q&A 목록 API 완성</li>
+          <li>프론트 목록 페이지 UI</li>
+        </ul>
+      </div>
+      <div class="phase-card planned">
+        <div class="phase-header">
+          <span class="phase-num">PHASE 4</span>
+          <span class="phase-status status-planned">예정</span>
+        </div>
+        <div class="phase-title">AI 통합 (Claude API)</div>
+        <ul class="phase-items">
+          <li>스레드에서 Q&A 자동 추출</li>
+          <li>Markdown 렌더링 상세 페이지</li>
+          <li>전문 검색 (pg_trgm)</li>
+          <li>기여자 리더보드</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- Local Dev Setup -->
+  <div class="section">
+    <div class="section-title">로컬 개발 환경 실행</div>
+    <div class="setup-grid">
+      <div class="setup-card">
+        <div class="terminal-label">
+          <div class="terminal-dot t1"></div>
+          <span>터미널 1 — API</span>
+        </div>
+        <div class="cmd"><span>$</span> pnpm dev:api</div>
+        <div class="setup-desc">Vercel dev 서버 실행<br/>localhost:3000</div>
+      </div>
+      <div class="setup-card">
+        <div class="terminal-label">
+          <div class="terminal-dot t2"></div>
+          <span>터미널 2 — 터널</span>
+        </div>
+        <div class="cmd"><span>$</span> ngrok http 3000</div>
+        <div class="setup-desc">Slack Webhook용 공개 URL<br/>ngrok URL → Slack Event URL 등록</div>
+      </div>
+      <div class="setup-card">
+        <div class="terminal-label">
+          <div class="terminal-dot t3"></div>
+          <span>터미널 3 — Web</span>
+        </div>
+        <div class="cmd"><span>$</span> pnpm dev:web</div>
+        <div class="setup-desc">Vite 개발 서버<br/>localhost:5173<br/>/api/* → 3000 프록시</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Env vars -->
+  <div class="section">
+    <div class="section-title">환경 변수 (.env.local)</div>
+    <div class="card">
+      <div class="env-list">
+        <div class="env-item">
+          <span class="env-key">DATABASE_URL</span>
+          <span class="env-desc">Supabase PostgreSQL 연결 URI (Transaction Pooler)</span>
+        </div>
+        <div class="env-item">
+          <span class="env-key">SLACK_BOT_TOKEN</span>
+          <span class="env-desc">Slack Bot OAuth 토큰 (xoxb- 로 시작)</span>
+        </div>
+        <div class="env-item">
+          <span class="env-key">SLACK_SIGNING_SECRET</span>
+          <span class="env-desc">Slack 앱 서명 검증용 시크릿</span>
+        </div>
+        <div class="env-item">
+          <span class="env-key">ANTHROPIC_API_KEY</span>
+          <span class="env-desc">Claude API 키 (Phase 4에서 사용)</span>
+        </div>
+        <div class="env-item">
+          <span class="env-key">SITE_URL</span>
+          <span class="env-desc">배포 URL (https://dev-knowledge-bot.vercel.app)</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer">
+    dev-knowledge-bot · Phase 3 · 2026-05-19
+  </div>
+
+</div>
+</body>
+</html>
