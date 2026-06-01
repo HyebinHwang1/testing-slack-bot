@@ -91,6 +91,9 @@ async function getBotUserId(slack: WebClient): Promise<string | null> {
 
 async function handleEvent(event: SlackEvent | undefined) {
   if (!event) return
+  console.log(
+    `[event] type=${event.type} subtype=${event.subtype ?? '-'} ch=${event.channel ?? '-'} thread=${event.thread_ts ? 'Y' : 'N'}`,
+  )
   if (event.channel_type === 'im') return
 
   const slackToken = process.env.SLACK_BOT_TOKEN
@@ -137,7 +140,12 @@ async function handleAutoQuestion(event: SlackEvent, slack: WebClient) {
   const channel = event.channel!
   const ts = event.ts!
 
-  // 2) 섹션 분류 → 담당자
+  const text = await composeReply(question)
+  await slack.chat.postMessage({ channel, thread_ts: ts, text })
+}
+
+// 섹션 분류 + KB 답변 + 담당자 태그를 합쳐 최종 답글 텍스트 생성 (멘션/자동 공용)
+async function composeReply(question: string): Promise<string> {
   const sections = await sql<Section[]>`
     SELECT id, name, description, curator_slack_id, curator_name,
            is_deleted, created_at, updated_at
@@ -145,17 +153,17 @@ async function handleAutoQuestion(event: SlackEvent, slack: WebClient) {
     WHERE is_deleted = FALSE
   `
   const matched = await classifySection(question, sections)
+  console.log(
+    `[reply] section=${matched?.name ?? '(none)'} curator=${matched?.curator_slack_id ?? '-'}`,
+  )
 
-  // 3) KB 기반 답변
   const answer = await generateAnswer(question)
 
-  // 4) 답변 + (담당자 있으면) 태그
   let text = `❓ *${question}*\n\n${answer}`
   if (matched?.curator_slack_id) {
     text += `\n\n👤 자세한 사항은 <@${matched.curator_slack_id}> 님께 문의하세요. (담당: ${matched.name})`
   }
-
-  await slack.chat.postMessage({ channel, thread_ts: ts, text })
+  return text
 }
 
 // 등록된 섹션 목록 중 질문이 어느 섹션인지 Claude로 분류 (없으면 null)
@@ -340,12 +348,12 @@ async function handleQuestion(event: SlackEvent, slack: WebClient) {
     return
   }
 
-  const answer = await generateAnswer(question)
+  const text = await composeReply(question)
 
   await slack.chat.postMessage({
     channel,
     thread_ts: ts,
-    text: `❓ *${question}*\n\n${answer}`,
+    text,
   })
 }
 
