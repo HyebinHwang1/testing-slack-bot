@@ -5,7 +5,7 @@
   "packageManager": "pnpm@9.0.0",
   "scripts": {
     "dev:web": "pnpm --filter web dev",
-    "dev:api": "vercel dev",
+    "dev:api": "bash -c 'set -a; [ -f .env.local ] && . ./.env.local; set +a; exec vercel dev --listen 5001'",
     "build": "pnpm --filter web build",
     "db:check": "tsx scripts/db-check.ts"
   },

@@ -19,3 +19,14 @@ export interface QaItem {
   created_at: Date
   updated_at: Date
 }
+
+export interface Section {
+  id: string
+  name: string
+  description: string | null
+  curator_slack_id: string | null
+  curator_name: string | null
+  is_deleted: boolean
+  created_at: Date
+  updated_at: Date
+}

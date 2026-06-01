@@ -2,7 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { WebClient } from '@slack/web-api'
 import Anthropic from '@anthropic-ai/sdk'
 import { verifySlackSignature } from '../_lib/slack-verify.js'
-import { sql } from '../_lib/db.js'
+import { sql, type Section } from '../_lib/db.js'
 
 const CLAUDE_MODEL = 'claude-haiku-4-5-20251001'
 
@@ -66,17 +66,34 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
 interface SlackEvent {
   type: string
+  subtype?: string
   user?: string
   text?: string
   ts?: string
   channel?: string
   thread_ts?: string
   channel_type?: string
+  bot_id?: string
+}
+
+// 봇 user id 캐시 (멘션/본인 메시지 필터링용)
+let botUserIdCache: string | null = null
+async function getBotUserId(slack: WebClient): Promise<string | null> {
+  if (botUserIdCache) return botUserIdCache
+  try {
+    const auth = await slack.auth.test()
+    botUserIdCache = (auth.user_id as string) ?? null
+  } catch (err) {
+    console.error('auth.test failed:', err)
+  }
+  return botUserIdCache
 }
 
 async function handleEvent(event: SlackEvent | undefined) {
   if (!event) return
-  if (event.type !== 'app_mention') return
+  console.log(
+    `[event] type=${event.type} subtype=${event.subtype ?? '-'} ch=${event.channel ?? '-'} thread=${event.thread_ts ? 'Y' : 'N'}`,
+  )
   if (event.channel_type === 'im') return
 
   const slackToken = process.env.SLACK_BOT_TOKEN
@@ -86,10 +103,112 @@ async function handleEvent(event: SlackEvent | undefined) {
   }
   const slack = new WebClient(slackToken)
 
-  if (event.thread_ts) {
-    await handleSave(event, slack)
-  } else {
-    await handleQuestion(event, slack)
+  if (event.type === 'app_mention') {
+    // 기존 멘션 기반 플로우 (스레드=저장 / 메인=질문)
+    if (event.thread_ts) {
+      await handleSave(event, slack)
+    } else {
+      await handleQuestion(event, slack)
+    }
+    return
+  }
+
+  if (event.type === 'message') {
+    await handleAutoQuestion(event, slack)
+  }
+}
+
+// ──────────────────────────────────────────────────────────────
+// 자동 질문 — 채널 최상위 메시지를 멘션 없이 감지해 답변 + 담당자 태그
+// ──────────────────────────────────────────────────────────────
+
+async function handleAutoQuestion(event: SlackEvent, slack: WebClient) {
+  // 1) 필터링 — 봇/시스템 메시지, 스레드 답글, 채널/길이 가드
+  if (event.subtype || event.bot_id) return
+  if (event.thread_ts) return // 최상위 메시지만 트리거
+
+  const targetChannel = process.env.SLACK_TARGET_CHANNEL_ID
+  if (targetChannel && event.channel !== targetChannel) return
+
+  const botUserId = await getBotUserId(slack)
+  if (botUserId && event.user === botUserId) return // 본인 메시지
+  if (botUserId && (event.text ?? '').includes(`<@${botUserId}>`)) return // 멘션은 app_mention이 처리
+
+  const question = (event.text ?? '').replace(/<@[A-Z0-9]+>/g, '').trim()
+  if (question.length < 5) return // 노이즈 가드
+
+  const channel = event.channel!
+  const ts = event.ts!
+
+  const text = await composeReply(question)
+  await slack.chat.postMessage({ channel, thread_ts: ts, text })
+}
+
+// 섹션 분류 + KB 답변 + 담당자 태그를 합쳐 최종 답글 텍스트 생성 (멘션/자동 공용)
+async function composeReply(question: string): Promise<string> {
+  const sections = await sql<Section[]>`
+    SELECT id, name, description, curator_slack_id, curator_name,
+           is_deleted, created_at, updated_at
+    FROM sections
+    WHERE is_deleted = FALSE
+  `
+  const matched = await classifySection(question, sections)
+  console.log(
+    `[reply] section=${matched?.name ?? '(none)'} curator=${matched?.curator_slack_id ?? '-'}`,
+  )
+
+  const answer = await generateAnswer(question)
+
+  let text = `❓ *${question}*\n\n${answer}`
+  if (matched?.curator_slack_id) {
+    text += `\n\n👤 자세한 사항은 <@${matched.curator_slack_id}> 님께 문의하세요. (담당: ${matched.name})`
+  }
+  return text
+}
+
+// 등록된 섹션 목록 중 질문이 어느 섹션인지 Claude로 분류 (없으면 null)
+async function classifySection(
+  question: string,
+  sections: Section[],
+): Promise<Section | null> {
+  if (sections.length === 0) return null
+
+  const sectionList = sections
+    .map((s) => `- ${s.name}${s.description ? `: ${s.description}` : ''}`)
+    .join('\n')
+
+  const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, maxRetries: 5 })
+  try {
+    const completion = await anthropic.messages.create({
+      model: CLAUDE_MODEL,
+      max_tokens: 128,
+      messages: [
+        {
+          role: 'user',
+          content: `다음 질문이 어느 섹션에 해당하는지 분류해주세요.
+
+섹션 목록:
+${sectionList}
+
+규칙:
+- 반드시 JSON 객체 하나만 출력 (다른 텍스트 없이)
+- 형식: {"section": "<섹션 이름 또는 null>"}
+- 목록의 섹션 이름과 정확히 일치하는 값만 사용
+- 명확히 해당하는 섹션이 없으면 {"section": null}
+
+질문: ${question}`,
+        },
+      ],
+    })
+    const rawText = completion.content[0]?.type === 'text' ? completion.content[0].text : ''
+    const jsonMatch = rawText.match(/\{[\s\S]*\}/)
+    if (!jsonMatch) return null
+    const parsed = JSON.parse(jsonMatch[0]) as { section?: string | null }
+    if (!parsed.section) return null
+    return sections.find((s) => s.name === parsed.section) ?? null
+  } catch (err) {
+    console.error('classifySection error:', err)
+    return null
   }
 }
 
@@ -229,6 +348,17 @@ async function handleQuestion(event: SlackEvent, slack: WebClient) {
     return
   }
 
+  const text = await composeReply(question)
+
+  await slack.chat.postMessage({
+    channel,
+    thread_ts: ts,
+    text,
+  })
+}
+
+// 저장된 Q&A 지식베이스를 Claude 컨텍스트로 답변 생성 (멘션/자동 질문 공용)
+async function generateAnswer(question: string): Promise<string> {
   const items = await sql<{ question: string; answer: string }[]>`
     SELECT question, answer
     FROM qa_items
@@ -242,7 +372,6 @@ async function handleQuestion(event: SlackEvent, slack: WebClient) {
     .join('\n\n')
 
   const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, maxRetries: 5 })
-  let answer: string
   try {
     const completion = await anthropic.messages.create({
       model: CLAUDE_MODEL,
@@ -261,24 +390,18 @@ ${knowledgeBase || '(아직 저장된 항목 없음)'}
         },
       ],
     })
-    answer = completion.content[0]?.type === 'text'
+    return completion.content[0]?.type === 'text'
       ? completion.content[0].text
       : '답변 생성에 실패했어요.'
   } catch (err) {
     const status = (err as { status?: number })?.status
     if (status === 529 || status === 503) {
-      answer = '⏳ AI 서버가 잠시 혼잡합니다. 잠시 후 다시 멘션해 주세요.'
+      return '⏳ AI 서버가 잠시 혼잡합니다. 잠시 후 다시 시도해 주세요.'
     } else if (status === 429) {
-      answer = '⏳ 잠시 후 다시 시도해주세요 (rate limit).'
+      return '⏳ 잠시 후 다시 시도해주세요 (rate limit).'
     } else {
       console.error('Claude API error:', err)
-      answer = '⚠️ 답변 생성 중 오류가 발생했어요.'
+      return '⚠️ 답변 생성 중 오류가 발생했어요.'
     }
   }
-
-  await slack.chat.postMessage({
-    channel,
-    thread_ts: ts,
-    text: `❓ *${question}*\n\n${answer}`,
-  })
 }

@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Slack 봇 PoC — 섹션 분류 + 담당자 자동 태그</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --panel: #181b24;
+    --panel-2: #1f232f;
+    --border: #2a2f3c;
+    --text: #e6e8ee;
+    --muted: #9aa3b2;
+    --purple: #a78bfa;
+    --pink: #f472b6;
+    --orange: #fb923c;
+    --green: #34d399;
+    --blue: #60a5fa;
+    --yellow: #fbbf24;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: radial-gradient(1200px 600px at 20% -10%, #1c2030 0%, var(--bg) 55%);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 48px 24px 80px; }
+  .badge {
+    display: inline-block; font-size: 12px; letter-spacing: .14em; font-weight: 700;
+    color: var(--purple); background: rgba(167,139,250,.12);
+    border: 1px solid rgba(167,139,250,.3); padding: 6px 12px; border-radius: 999px; margin-bottom: 18px;
+  }
+  h1 { font-size: 34px; margin: 0 0 8px; line-height: 1.25; }
+  h1 .accent { color: var(--purple); }
+  .lead { color: var(--muted); font-size: 16px; margin: 0 0 8px; }
+  .section { margin-top: 44px; }
+  .section-title {
+    font-size: 13px; font-weight: 700; letter-spacing: .12em; color: var(--muted);
+    text-transform: uppercase; margin-bottom: 16px; padding-left: 10px; border-left: 3px solid var(--purple);
+  }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 22px 24px; }
+  .grid { display: grid; gap: 14px; }
+  .grid-2 { grid-template-columns: 1fr 1fr; }
+  .grid-4 { grid-template-columns: repeat(4, 1fr); }
+  @media (max-width: 720px) { .grid-2, .grid-4 { grid-template-columns: 1fr; } .arch { flex-direction: column; } .arch-arrow { transform: rotate(90deg); } }
+  .tile { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 18px; }
+  .tile .ico { font-size: 26px; }
+  .tile h3 { margin: 8px 0 4px; font-size: 15px; }
+  .tile p { margin: 0; color: var(--muted); font-size: 13px; }
+  .muted { color: var(--muted); }
+  .pill { display:inline-block; font-size:12px; padding:2px 9px; border-radius:999px; border:1px solid var(--border); background:var(--panel-2); color:var(--muted); margin:2px 4px 2px 0; }
+
+  /* problem / solution */
+  .ps { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  @media (max-width:720px){ .ps{ grid-template-columns:1fr; } }
+  .ps .box { border-radius:12px; padding:18px 20px; border:1px solid var(--border); }
+  .ps .before { background:rgba(251,146,60,.07); border-color:rgba(251,146,60,.3); }
+  .ps .after { background:rgba(52,211,153,.07); border-color:rgba(52,211,153,.3); }
+  .ps h4 { margin:0 0 8px; font-size:14px; }
+  .ps .before h4 { color:var(--orange); }
+  .ps .after h4 { color:var(--green); }
+  .ps ul { margin:0; padding-left:18px; color:var(--muted); font-size:14px; }
+
+  /* arch diagram */
+  .arch { display:flex; align-items:center; justify-content:center; gap:6px; flex-wrap:wrap; }
+  .node { background:var(--panel-2); border:1px solid var(--border); border-radius:12px; padding:14px 16px; text-align:center; min-width:130px; }
+  .node .ico { font-size:24px; }
+  .node .lbl { font-weight:700; font-size:14px; margin-top:4px; }
+  .node .sub { font-size:11.5px; color:var(--muted); margin-top:3px; line-height:1.45; }
+  .arch-arrow { color:var(--muted); font-size:20px; padding:0 2px; }
+
+  /* flow steps */
+  .steps { counter-reset: step; display:grid; gap:12px; }
+  .step { display:flex; gap:14px; align-items:flex-start; background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:16px 18px; }
+  .step::before {
+    counter-increment: step; content: counter(step);
+    flex:0 0 30px; height:30px; border-radius:50%; background:rgba(167,139,250,.15);
+    color:var(--purple); font-weight:700; display:flex; align-items:center; justify-content:center; font-size:14px;
+  }
+  .step h4 { margin:0 0 3px; font-size:15px; }
+  .step p { margin:0; color:var(--muted); font-size:13.5px; }
+  .step code { color:var(--blue); }
+
+  code, pre { font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace; }
+  code { background:var(--panel-2); border:1px solid var(--border); border-radius:5px; padding:1px 6px; font-size:13px; color:var(--green); }
+  pre { background:#0b0d13; border:1px solid var(--border); border-radius:12px; padding:16px 18px; overflow:auto; font-size:13px; color:var(--text); }
+  pre .c { color:var(--muted); }
+  pre .k { color:var(--pink); }
+  pre .s { color:var(--green); }
+
+  table { width:100%; border-collapse:collapse; font-size:13.5px; }
+  th, td { text-align:left; padding:10px 12px; border-bottom:1px solid var(--border); }
+  th { color:var(--muted); font-weight:600; font-size:12px; letter-spacing:.04em; text-transform:uppercase; }
+  td code { font-size:12.5px; }
+
+  .slack {
+    background:#1a1d29; border:1px solid var(--border); border-radius:14px; padding:18px 20px; font-size:14px;
+  }
+  .slack .bot { display:flex; gap:10px; align-items:flex-start; }
+  .slack .avatar { width:34px; height:34px; border-radius:8px; background:linear-gradient(135deg,var(--purple),var(--pink)); display:flex; align-items:center; justify-content:center; font-size:18px; flex:0 0 34px; }
+  .slack .name { font-weight:700; }
+  .slack .time { color:var(--muted); font-size:12px; margin-left:6px; font-weight:400; }
+  .slack .msg { margin-top:4px; }
+  .slack .tag { color:var(--blue); background:rgba(96,165,250,.12); border-radius:4px; padding:0 4px; }
+  .slack .q { color:var(--muted); }
+
+  .foot { margin-top:50px; padding-top:22px; border-top:1px solid var(--border); color:var(--muted); font-size:13px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="badge">E-COMMERCE · DEV TEAM · PoC</div>
+  <h1>Slack 봇 PoC — <span class="accent">섹션 분류 + 담당자 자동 태그</span></h1>
+  <p class="lead">사업부 문의를 봇이 자동으로 분류해 답변하고, 담당자를 태그해 라우팅까지 안내하는 PoC.</p>
+  <p class="lead" style="font-size:13px;">기반: 개발팀 지식 봇 "철수" (Slack ↔ Claude ↔ Supabase ↔ React)</p>
+
+  <!-- 배경 -->
+  <div class="section">
+    <div class="section-title">왜 만들었나</div>
+    <div class="ps">
+      <div class="box before">
+        <h4>기존 (As-Is)</h4>
+        <ul>
+          <li>사업부가 Slack 채널에 문의/개발 요청을 올림</li>
+          <li><b>QA가 수동으로 담당자를 찾아</b> 일일이 라우팅</li>
+          <li>반복 질문도 매번 사람이 대응 → 병목</li>
+        </ul>
+      </div>
+      <div class="box after">
+        <h4>개선 (To-Be)</h4>
+        <ul>
+          <li>봇이 채널 메시지를 <b>자동 감지</b></li>
+          <li>질문의 <b>섹션을 분류</b> → 지식베이스로 <b>즉시 답변</b></li>
+          <li>해당 섹션 <b>담당자를 자동 태그</b>해 후속 문의 연결</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- 한눈에 -->
+  <div class="section">
+    <div class="section-title">한 눈에 보기</div>
+    <div class="grid grid-4">
+      <div class="tile"><div class="ico">💬</div><h3>Slack 자동 감지</h3><p>멘션 없이 채널 메시지를 봇이 감지</p></div>
+      <div class="tile"><div class="ico">🧠</div><h3>Claude 분류·답변</h3><p>섹션 분류 + 지식베이스 기반 답변</p></div>
+      <div class="tile"><div class="ico">👤</div><h3>담당자 자동 태그</h3><p>섹션 담당자를 답글에 <code>@태그</code></p></div>
+      <div class="tile"><div class="ico">🛠️</div><h3>어드민 관리</h3><p>섹션·담당자 CRUD 웹 페이지</p></div>
+    </div>
+  </div>
+
+  <!-- 아키텍처 -->
+  <div class="section">
+    <div class="section-title">아키텍처</div>
+    <div class="card">
+      <div class="arch">
+        <div class="node"><div class="ico">💬</div><div class="lbl" style="color:var(--purple)">Slack</div><div class="sub">채널 메시지 /<br/>@철수 멘션</div></div>
+        <div class="arch-arrow">→</div>
+        <div class="node"><div class="ico">⚡️</div><div class="lbl" style="color:var(--orange)">Vercel Functions</div><div class="sub">api/slack/events.ts<br/>api/sections.ts<br/>api/qa/*.ts</div></div>
+        <div class="arch-arrow">↔</div>
+        <div class="node"><div class="ico">🧠</div><div class="lbl" style="color:var(--pink)">Claude API</div><div class="sub">claude-haiku-4-5<br/>분류 · 답변 · Q/A 추출</div></div>
+        <div class="arch-arrow">↔</div>
+        <div class="node"><div class="ico">🗄️</div><div class="lbl" style="color:var(--green)">Supabase</div><div class="sub">PostgreSQL<br/>qa_items · sections</div></div>
+      </div>
+      <div style="text-align:center; margin-top:14px;">
+        <div class="arch-arrow" style="transform:rotate(90deg); display:inline-block;">↔</div>
+      </div>
+      <div class="arch" style="margin-top:6px;">
+        <div class="node" style="min-width:240px;"><div class="ico">⚛️</div><div class="lbl" style="color:var(--blue)">React Web (어드민)</div><div class="sub">web/src/App.tsx · hash routing<br/>#/admin/sections · 목록 · 상세</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 핵심 플로우 -->
+  <div class="section">
+    <div class="section-title">핵심 플로우 — 자동 응답</div>
+    <div class="steps">
+      <div class="step"><div><h4>채널 메시지 감지</h4><p>사업부가 채널에 글을 올리면 <code>message.channels</code> 이벤트 수신. (봇/스레드/짧은 글은 필터)</p></div></div>
+      <div class="step"><div><h4>섹션 분류</h4><p>어드민에 등록된 섹션 목록(이름+설명)을 Claude에 주고 질문이 어느 섹션인지 분류 (없으면 미분류).</p></div></div>
+      <div class="step"><div><h4>지식베이스 답변</h4><p>저장된 Q&amp;A(<code>qa_items</code>) 전체를 컨텍스트로 Claude가 답변 생성.</p></div></div>
+      <div class="step"><div><h4>담당자 태그 + 답글</h4><p>분류된 섹션에 담당자가 있으면 답글 끝에 <code>@담당자</code>를 붙여 스레드로 응답.</p></div></div>
+    </div>
+  </div>
+
+  <!-- Slack 미리보기 -->
+  <div class="section">
+    <div class="section-title">실제 동작 예시</div>
+    <div class="slack">
+      <div class="q">🧑‍💼 사업부원: <i>카드 결제가 자꾸 실패하는데 어디서 확인하나요?</i></div>
+      <div style="height:14px;"></div>
+      <div class="bot">
+        <div class="avatar">🤖</div>
+        <div>
+          <div><span class="name">철수</span><span class="time">앱 · 방금</span></div>
+          <div class="msg">
+            ❓ <b>카드 결제가 자꾸 실패하는데 어디서 확인하나요?</b><br/><br/>
+            관련해서 정리된 답변이 아직 없어요. 아래 담당자에게 확인해 주세요.<br/><br/>
+            👤 자세한 사항은 <span class="tag">@황혜빈</span> 님께 문의하세요. <span class="muted">(담당: 결제)</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="muted" style="font-size:12.5px; margin-top:10px;">※ 멘션(<code>@철수 …</code>)으로 물어도, 멘션 없이 그냥 올려도 동일하게 분류·태그된다.</p>
+  </div>
+
+  <!-- 이번에 추가된 것 -->
+  <div class="section">
+    <div class="section-title">이번 PoC에서 추가한 것</div>
+    <div class="card">
+      <table>
+        <thead><tr><th>구성</th><th>내용</th></tr></thead>
+        <tbody>
+          <tr><td>DB</td><td><code>sections</code> 테이블 신규 — 섹션명·설명·담당자(Slack ID)·담당자명</td></tr>
+          <tr><td>API</td><td><code>api/sections.ts</code> — 섹션 CRUD (GET/POST/PUT/DELETE)</td></tr>
+          <tr><td>Slack</td><td><code>events.ts</code> — <code>message</code> 자동 감지 + <code>composeReply</code>(섹션 분류 → 답변 → 담당자 태그). 기존 멘션 저장/질문 플로우 유지</td></tr>
+          <tr><td>Web</td><td><code>#/admin/sections</code> 섹션 관리 페이지 (목록·추가·수정·삭제)</td></tr>
+        </tbody>
+      </table>
+      <p class="muted" style="font-size:13px; margin:14px 0 0;">설계 원칙 — 섹션은 <b>담당자 매칭용 분류</b>일 뿐, 답변은 항상 전체 지식베이스에서 생성. 기존 <code>qa_items</code> 스키마·저장 플로우는 건드리지 않음.</p>
+    </div>
+  </div>
+
+  <!-- 봇이 처리하는 3가지 -->
+  <div class="section">
+    <div class="section-title">봇이 처리하는 입력</div>
+    <div class="grid grid-2">
+      <div class="tile"><div class="ico">💬</div><h3>채널 메시지 (멘션 없음)</h3><p><code>handleAutoQuestion</code> → 분류 + 답변 + 담당자 태그</p></div>
+      <div class="tile"><div class="ico">@️</div><h3>@철수 멘션 (질문)</h3><p><code>handleQuestion</code> → 동일하게 답변 + 담당자 태그</p></div>
+      <div class="tile"><div class="ico">🧵</div><h3>@철수 멘션 (스레드 내)</h3><p><code>handleSave</code> → 스레드 Q&amp;A를 추출해 지식베이스 저장</p></div>
+      <div class="tile"><div class="ico">🌐</div><h3>웹 어드민</h3><p>섹션·담당자 등록 / 저장된 Q&amp;A 열람</p></div>
+    </div>
+  </div>
+
+  <!-- 기술 스택 -->
+  <div class="section">
+    <div class="section-title">기술 스택</div>
+    <div class="card">
+      <span class="pill">Slack Events API</span>
+      <span class="pill">@slack/web-api</span>
+      <span class="pill">Claude (claude-haiku-4-5)</span>
+      <span class="pill">@anthropic-ai/sdk</span>
+      <span class="pill">Vercel Serverless</span>
+      <span class="pill">Supabase PostgreSQL</span>
+      <span class="pill">postgres.js</span>
+      <span class="pill">React 19</span>
+      <span class="pill">Vite</span>
+      <span class="pill">TailwindCSS</span>
+      <span class="pill">TypeScript</span>
+      <span class="pill">pnpm</span>
+    </div>
+  </div>
+
+  <!-- 데모 -->
+  <div class="section">
+    <div class="section-title">로컬 데모 실행</div>
+    <div class="card">
+      <pre><span class="c"># 1) 환경변수 (.env.local) 준비 — DATABASE_URL / ANTHROPIC_API_KEY / SLACK_BOT_TOKEN / SLACK_SIGNING_SECRET</span>
+<span class="c"># 2) 섹션 테이블 (최초 1회, Supabase SQL Editor)</span>
+psql ... &lt; scripts/sections-schema.sql
+
+<span class="c"># 3) API + 웹 기동</span>
+pnpm dev:api   <span class="c"># vercel dev → localhost:5001 (.env.local을 source)</span>
+pnpm dev:web   <span class="c"># vite → localhost:5173</span>
+
+<span class="c"># 4) Slack 로컬 연결</span>
+ngrok http 5001
+<span class="c"># Slack 앱 → Event Subscriptions Request URL = https://&lt;ngrok&gt;/api/slack/events</span>
+<span class="c"># 봇 이벤트: app_mention + message.channels / 스코프: channels:history / 봇 채널 초대</span></pre>
+      <p class="muted" style="font-size:13px; margin:14px 0 0;">어드민: <code>http://localhost:5173/#/admin/sections</code> 에서 섹션·담당자 등록 후, 채널에 관련 질문을 올려 동작 확인.</p>
+    </div>
+  </div>
+
+  <div class="foot">
+    dev-knowledge-bot · Slack 봇 PoC 확장 — 섹션 분류 + 담당자 자동 태그<br/>
+    데모 목적의 Proof of Concept 문서입니다.
+  </div>
+
+</div>
+</body>
+</html>
