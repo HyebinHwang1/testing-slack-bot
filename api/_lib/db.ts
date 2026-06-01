@@ -15,6 +15,7 @@ export interface QaItem {
   answer: string
   author_slack_id: string
   curator_slack_id: string
+  section_id: string | null
   view_count: number
   created_at: Date
   updated_at: Date

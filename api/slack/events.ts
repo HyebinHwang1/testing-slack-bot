@@ -6,6 +6,9 @@ import { sql, type Section } from '../_lib/db.js'
 
 const CLAUDE_MODEL = 'claude-haiku-4-5-20251001'
 
+// 토스 테크니컬 라이팅 원칙 (추후 PO가 채울 예정 — 비어 있는 동안 저장 프롬프트 동작 불변)
+const TOSS_WRITING_GUIDE = ''
+
 async function getRawBody(req: VercelRequest): Promise<string> {
   if (typeof req.body === 'string') return req.body
   if (req.body && typeof req.body === 'object') return JSON.stringify(req.body)
@@ -144,7 +147,8 @@ async function handleAutoQuestion(event: SlackEvent, slack: WebClient) {
   await slack.chat.postMessage({ channel, thread_ts: ts, text })
 }
 
-// 섹션 분류 + KB 답변 + 담당자 태그를 합쳐 최종 답글 텍스트 생성 (멘션/자동 공용)
+// 섹션 분류 + (섹션 스코프) KB 답변 + 담당자/QA 태그를 합쳐 최종 답글 텍스트 생성 (멘션/자동 공용)
+// 분기 기준은 "섹션 매칭 여부"가 아니라 "답할 데이터가 있는가"
 async function composeReply(question: string): Promise<string> {
   const sections = await sql<Section[]>`
     SELECT id, name, description, curator_slack_id, curator_name,
@@ -153,17 +157,54 @@ async function composeReply(question: string): Promise<string> {
     WHERE is_deleted = FALSE
   `
   const matched = await classifySection(question, sections)
+  const { items, scoped } = await fetchKnowledge(matched?.id ?? null)
   console.log(
-    `[reply] section=${matched?.name ?? '(none)'} curator=${matched?.curator_slack_id ?? '-'}`,
+    `[reply] section=${matched?.name ?? '(none)'} curator=${matched?.curator_slack_id ?? '-'} items=${items.length} scoped=${scoped}`,
   )
 
-  const answer = await generateAnswer(question)
+  const header = `❓ *${question}*`
 
-  let text = `❓ *${question}*\n\n${answer}`
-  if (matched?.curator_slack_id) {
-    text += `\n\n👤 자세한 사항은 <@${matched.curator_slack_id}> 님께 문의하세요. (담당: ${matched.name})`
+  // 분류 실패 → 전역 KB로 best-effort 답변 + QA 라우팅
+  if (!matched) {
+    const answer = await generateAnswerFromItems(question, items)
+    return `${header}\n\n${answer}\n\n${qaRoutingLine()}`
   }
-  return text
+
+  // 분류 성공 + 답할 데이터 없음 (섹션 0건 + 전역 폴백도 0건) → 라우팅만
+  if (items.length === 0) {
+    const tag = matched.curator_slack_id ? curatorLine(matched) : qaRoutingLine()
+    return `${header}\n\n아직 이 주제에 저장된 답이 없어요. 스레드에서 답변을 정리한 뒤 \`@철수 저장해줘\`로 저장해 주세요.\n\n${tag}`
+  }
+
+  // 분류 성공 + 데이터 있음 → 답변 + 담당자 항상 태그(담당자 있으면)
+  const answer = await generateAnswerFromItems(question, items)
+  const tail = matched.curator_slack_id ? `\n\n${curatorLine(matched)}` : ''
+  return `${header}\n\n${answer}${tail}`
+}
+
+// 담당자 안내 라인 (담당자가 등록된 섹션일 때)
+function curatorLine(section: Section): string {
+  return `👤 자세한 사항은 <@${section.curator_slack_id}> 님께 문의하세요. (담당: ${section.name})`
+}
+
+// 답을 못 찾았거나 담당자가 없을 때 QA로 라우팅. SLACK_QA_SLACK_ID 미설정 시 텍스트만.
+function qaRoutingLine(): string {
+  const tag = qaTag()
+  return tag
+    ? `🙋 담당을 특정하지 못했어요. ${tag} 님이 확인해 주세요.`
+    : '🙋 담당을 특정하지 못했어요. QA에게 문의해 주세요.'
+}
+
+// QA 담당자 태그 문자열. U…→<@U…>, S…(유저그룹)→<!subteam^S…>, <…> 형태는 그대로, 미설정→'' + warn.
+function qaTag(): string {
+  const raw = process.env.SLACK_QA_SLACK_ID?.trim()
+  if (!raw) {
+    console.warn('SLACK_QA_SLACK_ID not set — QA 태그를 생략합니다.')
+    return ''
+  }
+  if (raw.startsWith('<') && raw.endsWith('>')) return raw
+  if (/^S[A-Z0-9]+$/.test(raw)) return `<!subteam^${raw}>`
+  return `<@${raw}>`
 }
 
 // 등록된 섹션 목록 중 질문이 어느 섹션인지 Claude로 분류 (없으면 null)
@@ -251,17 +292,16 @@ async function handleSave(event: SlackEvent, slack: WebClient) {
       messages: [
         {
           role: 'user',
-          content: `다음 Slack 스레드에서 핵심 질문과 답변을 한 쌍 추출해주세요.
-답변은 가독성 좋은 한국어 마크다운으로 정리하세요. 코드/명령어가 있으면 코드 블록으로.
-
-규칙:
-- 반드시 JSON 객체 하나만 출력 (다른 텍스트 없이)
-- 형식: {"question": "...", "answer": "..."}
-- question은 1문장 이내
-- answer는 markdown
-
-스레드:
-${messages}`,
+          content:
+            `다음 Slack 스레드에서 핵심 질문과 답변을 한 쌍 추출해주세요.\n` +
+            `답변은 가독성 좋은 한국어 마크다운으로 정리하세요. 코드/명령어가 있으면 코드 블록으로.\n` +
+            (TOSS_WRITING_GUIDE ? `\n${TOSS_WRITING_GUIDE}\n` : '') +
+            `\n규칙:\n` +
+            `- 반드시 JSON 객체 하나만 출력 (다른 텍스트 없이)\n` +
+            `- 형식: {"question": "...", "answer": "..."}\n` +
+            `- question은 1문장 이내\n` +
+            `- answer는 markdown\n` +
+            `\n스레드:\n${messages}`,
         },
       ],
     })
@@ -309,21 +349,31 @@ ${messages}`,
     return
   }
 
+  // 2.5) 섹션 분류 — 셀프-그로잉: 다음 질문이 섹션 스코프로 검색되도록 section_id 채움
+  const sectionsForSave = await sql<Section[]>`
+    SELECT id, name, description, curator_slack_id, curator_name,
+           is_deleted, created_at, updated_at
+    FROM sections
+    WHERE is_deleted = FALSE
+  `
+  const savedSection = await classifySection(qa.question, sectionsForSave)
+  console.log(`[save] section=${savedSection?.name ?? '(none)'}`)
+
   // 3) DB INSERT
   const userId = event.user ?? 'UNKNOWN'
   const inserted = await sql<{ id: string }[]>`
-    INSERT INTO qa_items (question, answer, author_slack_id, curator_slack_id)
-    VALUES (${qa.question}, ${qa.answer}, ${userId}, ${userId})
+    INSERT INTO qa_items (question, answer, author_slack_id, curator_slack_id, section_id)
+    VALUES (${qa.question}, ${qa.answer}, ${userId}, ${userId}, ${savedSection?.id ?? null})
     RETURNING id
   `
 
-  // 4) 답글
+  // 4) 답글 (저장 커맨드 입력자 태깅)
   const siteUrl = process.env.SITE_URL ?? 'http://localhost:5173'
   await slack.chat.postMessage({
     channel,
     thread_ts: threadTs,
     text:
-      `💾 *저장 완료!*\n` +
+      `💾 *저장 완료!* (저장: <@${userId}>)\n` +
       `*Q.* ${qa.question}\n` +
       `*A.* ${qa.answer}\n\n` +
       `🔗 ${siteUrl} (id: ${inserted[0]?.id?.slice(0, 8)})`,
@@ -357,16 +407,37 @@ async function handleQuestion(event: SlackEvent, slack: WebClient) {
   })
 }
 
-// 저장된 Q&A 지식베이스를 Claude 컨텍스트로 답변 생성 (멘션/자동 질문 공용)
-async function generateAnswer(question: string): Promise<string> {
-  const items = await sql<{ question: string; answer: string }[]>`
+type KnowledgeRow = { question: string; answer: string }
+
+// 섹션 우선 조회 → 비면 전역 최근 50건으로 폴백 (전역 LIMIT 50 부담 완화 장치).
+// 섹션 스코프 쿼리엔 LIMIT 없음 — 큐레이션된 섹션은 규모가 한정적이라고 가정 (비대해지면 추후 LIMIT 추가).
+async function fetchKnowledge(
+  sectionId: string | null,
+): Promise<{ items: KnowledgeRow[]; scoped: boolean }> {
+  if (sectionId) {
+    const scopedItems = await sql<KnowledgeRow[]>`
+      SELECT question, answer
+      FROM qa_items
+      WHERE is_deleted = FALSE AND section_id = ${sectionId}
+      ORDER BY created_at DESC
+    `
+    if (scopedItems.length > 0) return { items: scopedItems, scoped: true }
+  }
+  const globalItems = await sql<KnowledgeRow[]>`
     SELECT question, answer
     FROM qa_items
     WHERE is_deleted = FALSE
     ORDER BY created_at DESC
     LIMIT 50
   `
+  return { items: globalItems, scoped: false }
+}
 
+// 주어진 KB 항목들을 Claude 컨텍스트로 답변 생성 (검색은 fetchKnowledge가 담당)
+async function generateAnswerFromItems(
+  question: string,
+  items: KnowledgeRow[],
+): Promise<string> {
   const knowledgeBase = items
     .map((i, idx) => `[${idx + 1}] Q: ${i.question}\nA: ${i.answer}`)
     .join('\n\n')

@@ -17,7 +17,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       SET view_count = view_count + 1
       WHERE id = ${id} AND is_deleted = FALSE
       RETURNING id, question, answer, author_slack_id, curator_slack_id,
-                view_count, created_at, updated_at
+                section_id, view_count, created_at, updated_at
     `
     if (rows.length === 0) {
       return res.status(404).json({ error: 'Not found' })

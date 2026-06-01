@@ -9,7 +9,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const items = await sql<QaItem[]>`
       SELECT id, question, answer, author_slack_id, curator_slack_id,
-             view_count, created_at, updated_at
+             section_id, view_count, created_at, updated_at
       FROM qa_items
       WHERE is_deleted = FALSE
       ORDER BY created_at DESC

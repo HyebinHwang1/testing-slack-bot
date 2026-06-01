@@ -7,7 +7,9 @@
     "dev:web": "pnpm --filter web dev",
     "dev:api": "bash -c 'set -a; [ -f .env.local ] && . ./.env.local; set +a; exec vercel dev --listen 5001'",
     "build": "pnpm --filter web build",
-    "db:check": "tsx scripts/db-check.ts"
+    "db:check": "tsx scripts/db-check.ts",
+    "db:migrate": "tsx scripts/migrate.ts",
+    "seed:exhibition": "tsx scripts/seed-exhibition.ts"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",
