@@ -610,14 +610,10 @@ async function diagnoseCsvWithLlm(
   const rawText = completion.content[0]?.type === 'text' ? completion.content[0].text : ''
   const jsonMatch = rawText.match(/\{[\s\S]*\}/)
   if (!jsonMatch) {
-    console.error('diagnoseCsvWithLlm: JSON parse fail', rawText)
-    return { is_delivery_csv: true, violations: [] }
+    console.error('diagnoseCsvWithLlm: JSON not found in LLM response', rawText)
+    throw new Error('LLM response did not contain JSON')
   }
-  try {
-    return JSON.parse(jsonMatch[0]) as DiagnosisResult
-  } catch {
-    return { is_delivery_csv: true, violations: [] }
-  }
+  return JSON.parse(jsonMatch[0]) as DiagnosisResult
 }
 
 const STATE_CAVEAT =
