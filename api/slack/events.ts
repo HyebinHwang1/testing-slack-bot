@@ -630,19 +630,48 @@ interface DiagnosisResult {
   violations: CsvViolation[]
 }
 
+// RFC 4180 CSV 파서 — 따옴표 안의 쉼표·줄바꿈을 올바르게 처리
+function parseCSVRows(text: string): string[][] {
+  const rows: string[][] = []
+  let row: string[] = []
+  let cell = ''
+  let inQuotes = false
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]
+    const next = text[i + 1]
+
+    if (ch === '"') {
+      if (inQuotes && next === '"') { cell += '"'; i++ }  // escaped quote
+      else inQuotes = !inQuotes
+    } else if (ch === ',' && !inQuotes) {
+      row.push(cell); cell = ''
+    } else if ((ch === '\n' || ch === '\r') && !inQuotes) {
+      if (ch === '\r' && next === '\n') i++  // CRLF
+      row.push(cell); cell = ''
+      if (row.some((c) => c.trim())) rows.push(row)
+      row = []
+    } else {
+      cell += ch
+    }
+  }
+  row.push(cell)
+  if (row.some((c) => c.trim())) rows.push(row)
+  return rows
+}
+
 // 코드로 전체 행을 검증 (결정적, 행 수 제한 없음)
 function validateFileStructure(csvText: string): CsvViolation[] {
   const violations: CsvViolation[] = []
-  const lines = csvText.split('\n').filter((l) => l.trim())
-  if (lines.length === 0) return violations
+  const rows = parseCSVRows(csvText)
+  if (rows.length === 0) return violations
 
-  const headerCols = lines[0].split(',').length
+  const headerCols = rows[0].length
 
-  for (let i = 1; i < lines.length; i++) {
-    const cols = lines[i].split(',')
+  for (let i = 1; i < rows.length; i++) {
+    const cols = rows[i]
     const rowNum = i + 1
 
-    // 컬럼 수 불일치
     if (cols.length !== headerCols) {
       violations.push({
         where: `행 ${rowNum}`,
@@ -651,7 +680,6 @@ function validateFileStructure(csvText: string): CsvViolation[] {
       })
     }
 
-    // 모든 셀이 빈 경우
     if (cols.every((c) => !c.trim())) {
       violations.push({ where: `행 ${rowNum}`, issue: '빈 행', detail: '모든 셀이 비어 있음' })
     }
@@ -775,7 +803,7 @@ async function handleCsvDiagnosis(event: SlackEvent, csvFile: SlackFile, slack: 
     return
   }
 
-  const rowCount = decoded.text.split('\n').filter((l) => l.trim()).length - 1
+  const rowCount = parseCSVRows(decoded.text).length - 1
 
   // 코드 검증: 전체 행 대상
   const structureViolations = validateFileStructure(decoded.text)
