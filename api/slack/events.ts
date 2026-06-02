@@ -144,6 +144,17 @@ async function handleEvent(event: SlackEvent | undefined) {
       await handleCsvDiagnosis(event, diagnosisFile, slack)
       return
     }
+    // 지원하지 않는 파일 형식 첨부 시 안내
+    const unsupportedFile = event.files?.find((f) => f.name)
+    if (unsupportedFile) {
+      const ext = unsupportedFile.name.split('.').pop()?.toLowerCase() ?? ''
+      await slack.chat.postMessage({
+        channel: event.channel!,
+        thread_ts: event.ts!,
+        text: `⚠️ *\`${unsupportedFile.name}\`* 형식은 지원하지 않아요.\nCSV(`.csv`) 또는 Excel(`.xlsx`) 파일로 변환 후 다시 첨부해 주세요. (현재 형식: \`${ext}\`)`,
+      })
+      return
+    }
     // 기존 멘션 기반 플로우 (스레드=저장 / 메인=질문)
     if (event.thread_ts) {
       await handleSave(event, slack)
