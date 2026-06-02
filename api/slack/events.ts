@@ -660,13 +660,23 @@ function parseCSVRows(text: string): string[][] {
   return rows
 }
 
+const IMAGE_EXTENSIONS = /\.(jpe?g|png|gif|webp|avif|svg)(\?.*)?$/i
+const IMAGE_HEADER_KEYWORDS = ['썸네일', '이미지', 'image', 'thumbnail', 'img', 'photo']
+
 // 코드로 전체 행을 검증 (결정적, 행 수 제한 없음)
 function validateFileStructure(csvText: string): CsvViolation[] {
   const violations: CsvViolation[] = []
   const rows = parseCSVRows(csvText)
   if (rows.length === 0) return violations
 
-  const headerCols = rows[0].length
+  const header = rows[0]
+  const headerCols = header.length
+
+  // 이미지 URL이어야 하는 컬럼 인덱스
+  const imageColIdxs = header
+    .map((h, i) => ({ h: h.toLowerCase(), i }))
+    .filter(({ h }) => IMAGE_HEADER_KEYWORDS.some((k) => h.includes(k)))
+    .map(({ i }) => i)
 
   for (let i = 1; i < rows.length; i++) {
     const cols = rows[i]
@@ -682,6 +692,20 @@ function validateFileStructure(csvText: string): CsvViolation[] {
 
     if (cols.every((c) => !c.trim())) {
       violations.push({ where: `행 ${rowNum}`, issue: '빈 행', detail: '모든 셀이 비어 있음' })
+      continue
+    }
+
+    // 이미지 컬럼 URL 형식 검증
+    for (const idx of imageColIdxs) {
+      const val = (cols[idx] ?? '').trim()
+      if (!val) continue
+      if (val.startsWith('http') && !IMAGE_EXTENSIONS.test(val.split('?')[0])) {
+        violations.push({
+          where: `행 ${rowNum}`,
+          issue: `이미지 URL 형식 오류 (${header[idx]})`,
+          detail: `이미지 파일 URL이 아닌 것 같아요: ${val.substring(0, 60)}`,
+        })
+      }
     }
   }
 
