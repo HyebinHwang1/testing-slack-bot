@@ -603,19 +603,18 @@ async function downloadAndDecodeCsv(
   }
 }
 
-async function fetchDeliveryPolicy(): Promise<string> {
+async function fetchSectionPolicy(sectionId: string): Promise<string> {
   try {
     const rows = await sql<{ question: string; answer: string }[]>`
-      SELECT q.question, q.answer
-      FROM qa_items q
-      JOIN sections s ON s.id = q.section_id
-      WHERE s.name = '배송' AND q.is_deleted = FALSE
-      ORDER BY q.created_at DESC
+      SELECT question, answer
+      FROM qa_items
+      WHERE section_id = ${sectionId} AND is_deleted = FALSE
+      ORDER BY created_at DESC
     `
     if (rows.length === 0) return ''
     return rows.map((r) => `Q: ${r.question}\nA: ${r.answer}`).join('\n\n')
   } catch (err) {
-    console.error('fetchDeliveryPolicy error:', err)
+    console.error('fetchSectionPolicy error:', err)
     return ''
   }
 }
@@ -627,7 +626,7 @@ interface CsvViolation {
 }
 
 interface DiagnosisResult {
-  is_delivery_csv: boolean
+  is_relevant_format: boolean
   violations: CsvViolation[]
 }
 
@@ -647,11 +646,12 @@ async function diagnoseCsvWithLlm(
     model: CLAUDE_MODEL,
     max_tokens: 1024,
     system:
-      '당신은 CSV 파일 형식 검증 도우미입니다. ' +
-      '아래 정책 문서에 비춰 CSV의 형식·패턴 위반만 찾으세요. ' +
-      '주문 상태(입금전취소·배송완료·결제전 등), 실제 주문번호 존재 여부, 배송사 DB 등록 여부는 CSV만으로 알 수 없으니 절대 판단하지 마세요. ' +
+      '당신은 파일 형식 검증 도우미입니다. ' +
+      '아래 정책 문서에 비춰 파일의 형식·패턴 위반만 찾으세요. ' +
+      'DB 조회가 필요한 항목(실제 존재 여부, 상태값 등)은 파일만으로 알 수 없으니 절대 판단하지 마세요. ' +
+      '정책 문서가 없거나 파일이 해당 정책과 무관한 형식이면 is_relevant_format을 false로 하세요. ' +
       '반드시 JSON 객체 하나만 출력하세요 (다른 텍스트 없이): ' +
-      '{"is_delivery_csv": bool, "violations": [{"where": "헤더|행 N|파일", "issue": "짧은 이름", "detail": "상세"}]}',
+      '{"is_relevant_format": bool, "violations": [{"where": "헤더|행 N|파일", "issue": "짧은 이름", "detail": "상세"}]}',
     messages: [
       {
         role: 'user',
@@ -671,34 +671,35 @@ async function diagnoseCsvWithLlm(
   return JSON.parse(jsonMatch[0]) as DiagnosisResult
 }
 
-const STATE_CAVEAT =
-  'ℹ️ 입금전취소·배송완료 등 주문 *상태* 기반 실패는 이 진단으로 확인할 수 없어요.\n실제 상태는 담당자 확인이 필요합니다.'
+const FILE_DIAGNOSIS_CAVEAT =
+  'ℹ️ DB 조회가 필요한 항목(실제 존재 여부·상태값 등)은 이 진단으로 확인할 수 없어요.\n해당 내용은 담당자 확인이 필요합니다.'
 
 function formatDiagnosisReply(
   result: DiagnosisResult,
   fileName: string,
   rowCount: number,
   truncated: boolean,
+  sectionName: string,
 ): string {
-  const header = `📋 *배송정보 CSV 진단 — ${fileName}* (${rowCount}행${truncated ? `, 앞 ${CSV_ROW_LIMIT}행만 검사` : ''})`
+  const header = `📋 *${sectionName} 파일 진단 — ${fileName}* (${rowCount}행${truncated ? `, 앞 ${CSV_ROW_LIMIT}행만 검사` : ''})`
 
-  if (!result.is_delivery_csv) {
+  if (!result.is_relevant_format) {
     return (
       `${header}\n\n` +
-      `⚠️ 첨부 파일이 배송정보 CSV 형식이 아닌 것 같아요.\n` +
-      `기대 헤더: \`ご注文商品番号,配送会社名,請求書番号\`\n\n` +
-      STATE_CAVEAT
+      `⚠️ 첨부 파일이 *${sectionName}* 관련 형식이 아닌 것 같아요.\n` +
+      `질문에 주제를 더 명확히 적어주시면 정확하게 진단할 수 있어요.\n\n` +
+      FILE_DIAGNOSIS_CAVEAT
     )
   }
 
   if (result.violations.length === 0) {
-    return `${header}\n\n✅ 형식상 문제는 발견되지 않았어요.\n\n${STATE_CAVEAT}`
+    return `${header}\n\n✅ 형식상 문제는 발견되지 않았어요.\n\n${FILE_DIAGNOSIS_CAVEAT}`
   }
 
   const list = result.violations
     .map((v) => `• [${v.where}] *${v.issue}* — ${v.detail}`)
     .join('\n')
-  return `${header}\n\n⚠️ *형식·패턴 점검 결과*\n${list}\n\n${STATE_CAVEAT}`
+  return `${header}\n\n⚠️ *형식·패턴 점검 결과*\n${list}\n\n${FILE_DIAGNOSIS_CAVEAT}`
 }
 
 async function handleCsvDiagnosis(event: SlackEvent, csvFile: SlackFile, slack: WebClient) {
@@ -706,12 +707,28 @@ async function handleCsvDiagnosis(event: SlackEvent, csvFile: SlackFile, slack: 
   const ts = event.ts!
   const token = process.env.SLACK_BOT_TOKEN!
 
+  // 멘션 텍스트로 섹션 분류
+  const question = (event.text ?? '').replace(/<@[A-Z0-9]+>/g, '').trim()
+  const sections = await sql<Section[]>`
+    SELECT id, name, description, curator_slack_id, curator_name, is_deleted, created_at, updated_at
+    FROM sections WHERE is_deleted = FALSE
+  `
+  const matched = await classifySection(question, sections)
+  if (!matched) {
+    await slack.chat.postMessage({
+      channel,
+      thread_ts: ts,
+      text: '어떤 주제 관련 파일인지 알 수 없어요. 질문에 주제를 포함해서 다시 보내주세요.\n예) `@철수 배송 CSV 확인해줘` / `@철수 상품 엑셀 검토해줘`',
+    })
+    return
+  }
+
   const decoded = await downloadAndDecodeCsv(csvFile, token)
   if (!decoded.ok) {
     await slack.chat.postMessage({
       channel,
       thread_ts: ts,
-      text: `📋 *배송정보 CSV 진단 — ${csvFile.name}*\n\n⚠️ ${decoded.reason}`,
+      text: `📋 *${matched.name} 파일 진단 — ${csvFile.name}*\n\n⚠️ ${decoded.reason}`,
     })
     return
   }
@@ -720,7 +737,7 @@ async function handleCsvDiagnosis(event: SlackEvent, csvFile: SlackFile, slack: 
   const rowCount = nonEmptyLines.length - 1
   const truncated = nonEmptyLines.length > CSV_ROW_LIMIT
 
-  const policy = await fetchDeliveryPolicy()
+  const policy = await fetchSectionPolicy(matched.id)
 
   let result: DiagnosisResult
   try {
@@ -739,6 +756,6 @@ async function handleCsvDiagnosis(event: SlackEvent, csvFile: SlackFile, slack: 
     return
   }
 
-  const text = formatDiagnosisReply(result, csvFile.name, rowCount, truncated)
+  const text = formatDiagnosisReply(result, csvFile.name, rowCount, truncated, matched.name)
   await slack.chat.postMessage({ channel, thread_ts: ts, text })
 }
