@@ -151,7 +151,7 @@ async function handleEvent(event: SlackEvent | undefined) {
       await slack.chat.postMessage({
         channel: event.channel!,
         thread_ts: event.ts!,
-        text: `⚠️ *\`${unsupportedFile.name}\`* 형식은 지원하지 않아요.\nCSV(`.csv`) 또는 Excel(`.xlsx`) 파일로 변환 후 다시 첨부해 주세요. (현재 형식: \`${ext}\`)`,
+        text: `⚠️ *${unsupportedFile.name}* 형식은 지원하지 않아요.\nCSV(.csv) 또는 Excel(.xlsx) 파일로 변환 후 다시 첨부해 주세요. (현재 형식: ${ext})`,
       })
       return
     }
