@@ -532,7 +532,7 @@ async function downloadAndDecodeCsv(
   const bytes = new Uint8Array(arrayBuffer)
   for (const encoding of DECODE_ENCODINGS) {
     try {
-      const decoder = new TextDecoder(encoding, { fatal: true })
+      const decoder = new TextDecoder(encoding, { fatal: false })
       const text = decoder.decode(bytes)
       if (!text.includes('�')) {
         return { ok: true, text }
@@ -661,9 +661,9 @@ async function handleCsvDiagnosis(event: SlackEvent, csvFile: SlackFile, slack: 
     return
   }
 
-  const lines = decoded.text.split('\n')
-  const rowCount = lines.filter((l) => l.trim()).length - 1
-  const truncated = lines.length > CSV_ROW_LIMIT
+  const nonEmptyLines = decoded.text.split('\n').filter((l) => l.trim())
+  const rowCount = nonEmptyLines.length - 1
+  const truncated = nonEmptyLines.length > CSV_ROW_LIMIT
 
   const policy = await fetchDeliveryPolicy()
 
@@ -672,13 +672,14 @@ async function handleCsvDiagnosis(event: SlackEvent, csvFile: SlackFile, slack: 
     result = await diagnoseCsvWithLlm(policy, decoded.text, csvFile.name)
   } catch (err) {
     const status = (err as { status?: number })?.status
+    const isParseError = (err as Error).message === 'LLM response did not contain JSON'
     const msg =
       status === 529 || status === 503
         ? '⏳ AI 서버가 잠시 혼잡합니다. 잠시 후 다시 시도해 주세요.'
         : status === 429
           ? '⏳ 잠시 후 다시 시도해주세요 (rate limit).'
           : '⚠️ 진단 중 오류가 발생했어요.'
-    console.error('diagnoseCsvWithLlm error:', err)
+    console.error(isParseError ? '[CSV진단] LLM JSON 파싱 실패' : '[CSV진단] LLM API 오류:', err)
     await slack.chat.postMessage({ channel, thread_ts: ts, text: msg })
     return
   }
