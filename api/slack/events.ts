@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { WebClient } from '@slack/web-api'
 import Anthropic from '@anthropic-ai/sdk'
+import * as XLSX from 'xlsx'
 import { verifySlackSignature } from '../_lib/slack-verify.js'
 import { sql, type Section } from '../_lib/db.js'
 
@@ -130,12 +131,17 @@ async function handleEvent(event: SlackEvent | undefined) {
   const slack = new WebClient(slackToken)
 
   if (event.type === 'app_mention') {
-    // CSV 첨부 → 진단 최우선 (저장/질문보다 앞)
-    const csvFile = event.files?.find(
-      (f) => f.filetype === 'csv' || f.name.toLowerCase().endsWith('.csv'),
-    )
-    if (csvFile) {
-      await handleCsvDiagnosis(event, csvFile, slack)
+    // CSV/Excel 첨부 → 진단 최우선 (저장/질문보다 앞)
+    const diagnosisFile = event.files?.find((f) => {
+      const name = f.name.toLowerCase()
+      return (
+        f.filetype === 'csv' || name.endsWith('.csv') ||
+        f.filetype === 'xlsx' || f.filetype === 'xls' ||
+        name.endsWith('.xlsx') || name.endsWith('.xls')
+      )
+    })
+    if (diagnosisFile) {
+      await handleCsvDiagnosis(event, diagnosisFile, slack)
       return
     }
     // 기존 멘션 기반 플로우 (스레드=저장 / 메인=질문)
@@ -515,6 +521,14 @@ ${knowledgeBase || '(아직 저장된 항목 없음)'}
 
 const DECODE_ENCODINGS = ['shift_jis', 'utf-8-sig', 'utf-8', 'euc-jp'] as const
 
+function isExcelFile(file: SlackFile): boolean {
+  const name = file.name.toLowerCase()
+  return (
+    file.filetype === 'xlsx' || file.filetype === 'xls' ||
+    name.endsWith('.xlsx') || name.endsWith('.xls')
+  )
+}
+
 async function downloadAndDecodeCsv(
   file: SlackFile,
   token: string,
@@ -532,6 +546,22 @@ async function downloadAndDecodeCsv(
     return { ok: false, reason: `파일 다운로드 중 오류: ${(err as Error).message}` }
   }
 
+  // Excel 파일 → 첫 번째 시트를 CSV 텍스트로 변환
+  if (isExcelFile(file)) {
+    try {
+      const workbook = XLSX.read(arrayBuffer, { type: 'array' })
+      const sheetName = workbook.SheetNames[0]
+      if (!sheetName) {
+        return { ok: false, reason: '엑셀 파일에 시트가 없어요.' }
+      }
+      const text = XLSX.utils.sheet_to_csv(workbook.Sheets[sheetName])
+      return { ok: true, text }
+    } catch (err) {
+      return { ok: false, reason: `엑셀 파일 파싱 실패: ${(err as Error).message}` }
+    }
+  }
+
+  // CSV 파일 → 인코딩 디코딩
   const bytes = new Uint8Array(arrayBuffer)
   for (const encoding of DECODE_ENCODINGS) {
     try {
