@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
+import { waitUntil } from '@vercel/functions'
 import { WebClient } from '@slack/web-api'
 import Anthropic from '@anthropic-ai/sdk'
 import { verifySlackSignature } from '../_lib/slack-verify.js'
@@ -79,9 +80,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         processedEventIds.delete(processedEventIds.values().next().value)
       }
     }
-    await handleEvent(body.event).catch((err) => {
-      console.error('Event handler error:', err)
-    })
+    // Slack은 3초 내 200 ack가 없으면 같은 event_id를 재전송한다(중복 응답 원인).
+    // 무거운 처리(Claude 호출 등)를 await하지 말고 즉시 ack한 뒤, waitUntil로
+    // 백그라운드에서 끝까지 실행한다 — 서버리스에서 응답 반환 후에도 실행을 보장한다.
+    waitUntil(
+      handleEvent(body.event).catch((err) => {
+        console.error('Event handler error:', err)
+      }),
+    )
     return res.status(200).json({ ok: true })
   }
 
