@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 
 interface QaItem {
   id: string
@@ -142,7 +143,7 @@ function DetailPage({ id }: { id: string }) {
           </div>
 
           <div className="mt-6 prose prose-slate prose-sm max-w-none prose-pre:bg-slate-900 prose-pre:text-slate-100">
-            <ReactMarkdown>{item.answer}</ReactMarkdown>
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{item.answer}</ReactMarkdown>
           </div>
         </article>
       )}
