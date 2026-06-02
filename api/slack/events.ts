@@ -79,6 +79,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 // 이벤트 라우팅
 // ──────────────────────────────────────────────────────────────
 
+interface SlackFile {
+  id: string
+  name: string
+  filetype: string
+  url_private_download: string
+  size: number
+}
+
 interface SlackEvent {
   type: string
   subtype?: string
@@ -89,6 +97,7 @@ interface SlackEvent {
   thread_ts?: string
   channel_type?: string
   bot_id?: string
+  files?: SlackFile[]
 }
 
 // 봇 user id 캐시 (멘션/본인 메시지 필터링용)
@@ -119,6 +128,14 @@ async function handleEvent(event: SlackEvent | undefined) {
   const slack = new WebClient(slackToken)
 
   if (event.type === 'app_mention') {
+    // CSV 첨부 → 진단 최우선 (저장/질문보다 앞)
+    const csvFile = event.files?.find(
+      (f) => f.filetype === 'csv' || f.name.toLowerCase().endsWith('.csv'),
+    )
+    if (csvFile) {
+      await handleCsvDiagnosis(event, csvFile, slack)
+      return
+    }
     // 기존 멘션 기반 플로우 (스레드=저장 / 메인=질문)
     if (event.thread_ts) {
       await handleSave(event, slack)
@@ -487,4 +504,189 @@ ${knowledgeBase || '(아직 저장된 항목 없음)'}
       return '⚠️ 답변 생성 중 오류가 발생했어요.'
     }
   }
+}
+
+// ──────────────────────────────────────────────────────────────
+// CSV 자동 진단
+// ──────────────────────────────────────────────────────────────
+
+const DECODE_ENCODINGS = ['shift_jis', 'utf-8-sig', 'utf-8', 'euc-jp'] as const
+
+async function downloadAndDecodeCsv(
+  file: SlackFile,
+  token: string,
+): Promise<{ ok: true; text: string } | { ok: false; reason: string }> {
+  let arrayBuffer: ArrayBuffer
+  try {
+    const res = await fetch(file.url_private_download, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    if (!res.ok) {
+      return { ok: false, reason: `파일 다운로드 실패 (HTTP ${res.status})` }
+    }
+    arrayBuffer = await res.arrayBuffer()
+  } catch (err) {
+    return { ok: false, reason: `파일 다운로드 중 오류: ${(err as Error).message}` }
+  }
+
+  const bytes = new Uint8Array(arrayBuffer)
+  for (const encoding of DECODE_ENCODINGS) {
+    try {
+      const decoder = new TextDecoder(encoding, { fatal: true })
+      const text = decoder.decode(bytes)
+      if (!text.includes('�')) {
+        return { ok: true, text }
+      }
+    } catch {
+      // 이 인코딩으로 디코딩 불가 → 다음 시도
+    }
+  }
+  return {
+    ok: false,
+    reason:
+      '파일 인코딩을 인식하지 못했어요. shift_jis / UTF-8 / EUC-JP 중 하나로 저장 후 다시 업로드해 주세요.',
+  }
+}
+
+async function fetchDeliveryPolicy(): Promise<string> {
+  try {
+    const rows = await sql<{ question: string; answer: string }[]>`
+      SELECT q.question, q.answer
+      FROM qa_items q
+      JOIN sections s ON s.id = q.section_id
+      WHERE s.name = '배송' AND q.is_deleted = FALSE
+      ORDER BY q.created_at DESC
+    `
+    if (rows.length === 0) return ''
+    return rows.map((r) => `Q: ${r.question}\nA: ${r.answer}`).join('\n\n')
+  } catch (err) {
+    console.error('fetchDeliveryPolicy error:', err)
+    return ''
+  }
+}
+
+interface CsvViolation {
+  where: string
+  issue: string
+  detail: string
+}
+
+interface DiagnosisResult {
+  is_delivery_csv: boolean
+  violations: CsvViolation[]
+}
+
+const CSV_ROW_LIMIT = 200
+
+async function diagnoseCsvWithLlm(
+  policy: string,
+  csvText: string,
+  fileName: string,
+): Promise<DiagnosisResult> {
+  const lines = csvText.split('\n')
+  const truncated = lines.length > CSV_ROW_LIMIT
+  const csvSample = lines.slice(0, CSV_ROW_LIMIT).join('\n') + (truncated ? '\n... (이하 생략)' : '')
+
+  const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, maxRetries: 5 })
+  const completion = await anthropic.messages.create({
+    model: CLAUDE_MODEL,
+    max_tokens: 1024,
+    system:
+      '당신은 CSV 파일 형식 검증 도우미입니다. ' +
+      '아래 정책 문서에 비춰 CSV의 형식·패턴 위반만 찾으세요. ' +
+      '주문 상태(입금전취소·배송완료·결제전 등), 실제 주문번호 존재 여부, 배송사 DB 등록 여부는 CSV만으로 알 수 없으니 절대 판단하지 마세요. ' +
+      '반드시 JSON 객체 하나만 출력하세요 (다른 텍스트 없이): ' +
+      '{"is_delivery_csv": bool, "violations": [{"where": "헤더|행 N|파일", "issue": "짧은 이름", "detail": "상세"}]}',
+    messages: [
+      {
+        role: 'user',
+        content:
+          `[정책 문서]\n${policy || '(정책 없음)'}\n\n` +
+          `[CSV 파일: ${fileName}${truncated ? ` — 앞 ${CSV_ROW_LIMIT}행만 표시` : ''}]\n${csvSample}`,
+      },
+    ],
+  })
+
+  const rawText = completion.content[0]?.type === 'text' ? completion.content[0].text : ''
+  const jsonMatch = rawText.match(/\{[\s\S]*\}/)
+  if (!jsonMatch) {
+    console.error('diagnoseCsvWithLlm: JSON parse fail', rawText)
+    return { is_delivery_csv: true, violations: [] }
+  }
+  try {
+    return JSON.parse(jsonMatch[0]) as DiagnosisResult
+  } catch {
+    return { is_delivery_csv: true, violations: [] }
+  }
+}
+
+const STATE_CAVEAT =
+  'ℹ️ 입금전취소·배송완료 등 주문 *상태* 기반 실패는 이 진단으로 확인할 수 없어요.\n실제 상태는 담당자 확인이 필요합니다.'
+
+function formatDiagnosisReply(
+  result: DiagnosisResult,
+  fileName: string,
+  rowCount: number,
+  truncated: boolean,
+): string {
+  const header = `📋 *배송정보 CSV 진단 — ${fileName}* (${rowCount}행${truncated ? `, 앞 ${CSV_ROW_LIMIT}행만 검사` : ''})`
+
+  if (!result.is_delivery_csv) {
+    return (
+      `${header}\n\n` +
+      `⚠️ 첨부 파일이 배송정보 CSV 형식이 아닌 것 같아요.\n` +
+      `기대 헤더: \`ご注文商品番号,配送会社名,請求書番号\`\n\n` +
+      STATE_CAVEAT
+    )
+  }
+
+  if (result.violations.length === 0) {
+    return `${header}\n\n✅ 형식상 문제는 발견되지 않았어요.\n\n${STATE_CAVEAT}`
+  }
+
+  const list = result.violations
+    .map((v) => `• [${v.where}] *${v.issue}* — ${v.detail}`)
+    .join('\n')
+  return `${header}\n\n⚠️ *형식·패턴 점검 결과*\n${list}\n\n${STATE_CAVEAT}`
+}
+
+async function handleCsvDiagnosis(event: SlackEvent, csvFile: SlackFile, slack: WebClient) {
+  const channel = event.channel!
+  const ts = event.ts!
+  const token = process.env.SLACK_BOT_TOKEN!
+
+  const decoded = await downloadAndDecodeCsv(csvFile, token)
+  if (!decoded.ok) {
+    await slack.chat.postMessage({
+      channel,
+      thread_ts: ts,
+      text: `📋 *배송정보 CSV 진단 — ${csvFile.name}*\n\n⚠️ ${decoded.reason}`,
+    })
+    return
+  }
+
+  const lines = decoded.text.split('\n')
+  const rowCount = lines.filter((l) => l.trim()).length - 1
+  const truncated = lines.length > CSV_ROW_LIMIT
+
+  const policy = await fetchDeliveryPolicy()
+
+  let result: DiagnosisResult
+  try {
+    result = await diagnoseCsvWithLlm(policy, decoded.text, csvFile.name)
+  } catch (err) {
+    const status = (err as { status?: number })?.status
+    const msg =
+      status === 529 || status === 503
+        ? '⏳ AI 서버가 잠시 혼잡합니다. 잠시 후 다시 시도해 주세요.'
+        : status === 429
+          ? '⏳ 잠시 후 다시 시도해주세요 (rate limit).'
+          : '⚠️ 진단 중 오류가 발생했어요.'
+    console.error('diagnoseCsvWithLlm error:', err)
+    await slack.chat.postMessage({ channel, thread_ts: ts, text: msg })
+    return
+  }
+
+  const text = formatDiagnosisReply(result, csvFile.name, rowCount, truncated)
+  await slack.chat.postMessage({ channel, thread_ts: ts, text })
 }
