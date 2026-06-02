@@ -6,6 +6,9 @@ import { sql, type Section } from '../_lib/db.js'
 
 const CLAUDE_MODEL = 'claude-haiku-4-5-20251001'
 
+// Slack 재전송 중복 방지 (event_id 기준, 서버 재시작 시 초기화)
+const processedEventIds = new Set<string>()
+
 // 저장 글(answer) 작성 가이드. 원본: 노션 "철수 글 작성 가이드 (시스템 프롬프트)".
 // handleSave의 Q/A 추출 프롬프트에 주입된다.
 const TOSS_WRITING_GUIDE = `작성 원칙 (answer 작성 시 반드시 따를 것)
@@ -65,13 +68,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   if (body.type === 'event_callback') {
-    // 200을 먼저 반환해야 Slack이 이벤트를 재전송하지 않는다.
-    // LLM 호출이 3초를 넘으면 Slack이 재시도해 중복 답글이 생기므로 비동기 처리.
-    res.status(200).json({ ok: true })
-    handleEvent(body.event).catch((err) => {
+    // 동일 event_id 재전송 무시 (Slack은 3초 내 응답 없으면 재시도)
+    const eventId: string | undefined = body.event_id
+    if (eventId) {
+      if (processedEventIds.has(eventId)) {
+        return res.status(200).json({ ok: true })
+      }
+      processedEventIds.add(eventId)
+      if (processedEventIds.size > 200) {
+        processedEventIds.delete(processedEventIds.values().next().value)
+      }
+    }
+    await handleEvent(body.event).catch((err) => {
       console.error('Event handler error:', err)
     })
-    return
+    return res.status(200).json({ ok: true })
   }
 
   return res.status(200).json({ ok: true })
