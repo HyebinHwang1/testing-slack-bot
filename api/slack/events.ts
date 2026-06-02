@@ -65,11 +65,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   if (body.type === 'event_callback') {
-    const event = body.event
-    await handleEvent(event).catch((err) => {
+    // 200을 먼저 반환해야 Slack이 이벤트를 재전송하지 않는다.
+    // LLM 호출이 3초를 넘으면 Slack이 재시도해 중복 답글이 생기므로 비동기 처리.
+    res.status(200).json({ ok: true })
+    handleEvent(body.event).catch((err) => {
       console.error('Event handler error:', err)
     })
-    return res.status(200).json({ ok: true })
+    return
   }
 
   return res.status(200).json({ ok: true })
