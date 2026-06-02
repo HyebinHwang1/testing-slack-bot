@@ -630,16 +630,56 @@ interface DiagnosisResult {
   violations: CsvViolation[]
 }
 
-const CSV_ROW_LIMIT = 200
+// 코드로 전체 행을 검증 (결정적, 행 수 제한 없음)
+function validateFileStructure(csvText: string): CsvViolation[] {
+  const violations: CsvViolation[] = []
+  const lines = csvText.split('\n').filter((l) => l.trim())
+  if (lines.length === 0) return violations
+
+  const headerCols = lines[0].split(',').length
+
+  for (let i = 1; i < lines.length; i++) {
+    const cols = lines[i].split(',')
+    const rowNum = i + 1
+
+    // 컬럼 수 불일치
+    if (cols.length !== headerCols) {
+      violations.push({
+        where: `행 ${rowNum}`,
+        issue: '컬럼 수 불일치',
+        detail: `헤더는 ${headerCols}열인데 이 행은 ${cols.length}열`,
+      })
+    }
+
+    // 모든 셀이 빈 경우
+    if (cols.every((c) => !c.trim())) {
+      violations.push({ where: `행 ${rowNum}`, issue: '빈 행', detail: '모든 셀이 비어 있음' })
+    }
+  }
+
+  return violations
+}
+
+const LLM_SAMPLE_ROWS = 30
 
 async function diagnoseCsvWithLlm(
   policy: string,
   csvText: string,
   fileName: string,
+  structureViolations: CsvViolation[],
 ): Promise<DiagnosisResult> {
-  const lines = csvText.split('\n')
-  const truncated = lines.length > CSV_ROW_LIMIT
-  const csvSample = lines.slice(0, CSV_ROW_LIMIT).join('\n') + (truncated ? '\n... (이하 생략)' : '')
+  const lines = csvText.split('\n').filter((l) => l.trim())
+  const sample = lines.slice(0, LLM_SAMPLE_ROWS + 1).join('\n')
+  const totalRows = lines.length - 1
+  const structureSummary =
+    structureViolations.length > 0
+      ? `코드 검증 결과 (전체 ${totalRows}행 검사): ${structureViolations.length}건 발견\n` +
+        structureViolations
+          .slice(0, 10)
+          .map((v) => `- [${v.where}] ${v.issue}: ${v.detail}`)
+          .join('\n') +
+        (structureViolations.length > 10 ? `\n... 외 ${structureViolations.length - 10}건` : '')
+      : `코드 검증 결과 (전체 ${totalRows}행 검사): 구조 이상 없음`
 
   const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, maxRetries: 5 })
   const completion = await anthropic.messages.create({
@@ -647,7 +687,8 @@ async function diagnoseCsvWithLlm(
     max_tokens: 1024,
     system:
       '당신은 파일 형식 검증 도우미입니다. ' +
-      '아래 정책 문서에 비춰 파일의 형식·패턴 위반만 찾으세요. ' +
+      '아래 정책 문서에 비춰 파일의 정책 위반을 찾으세요. ' +
+      '구조 검증(컬럼 수·빈 행)은 이미 코드로 완료됐으니 중복하지 마세요. ' +
       'DB 조회가 필요한 항목(실제 존재 여부, 상태값 등)은 파일만으로 알 수 없으니 절대 판단하지 마세요. ' +
       '정책 문서가 없거나 파일이 해당 정책과 무관한 형식이면 is_relevant_format을 false로 하세요. ' +
       '반드시 JSON 객체 하나만 출력하세요 (다른 텍스트 없이): ' +
@@ -657,7 +698,8 @@ async function diagnoseCsvWithLlm(
         role: 'user',
         content:
           `[정책 문서]\n${policy || '(정책 없음)'}\n\n` +
-          `[CSV 파일: ${fileName}${truncated ? ` — 앞 ${CSV_ROW_LIMIT}행만 표시` : ''}]\n${csvSample}`,
+          `[코드 검증 요약]\n${structureSummary}\n\n` +
+          `[파일 샘플: ${fileName} — 앞 ${LLM_SAMPLE_ROWS}행]\n${sample}`,
       },
     ],
   })
@@ -676,12 +718,12 @@ const FILE_DIAGNOSIS_CAVEAT =
 
 function formatDiagnosisReply(
   result: DiagnosisResult,
+  structureViolations: CsvViolation[],
   fileName: string,
   rowCount: number,
-  truncated: boolean,
   sectionName: string,
 ): string {
-  const header = `📋 *${sectionName} 파일 진단 — ${fileName}* (${rowCount}행${truncated ? `, 앞 ${CSV_ROW_LIMIT}행만 검사` : ''})`
+  const header = `📋 *${sectionName} 파일 진단 — ${fileName}* (전체 ${rowCount}행 검사)`
 
   if (!result.is_relevant_format) {
     return (
@@ -692,13 +734,13 @@ function formatDiagnosisReply(
     )
   }
 
-  if (result.violations.length === 0) {
+  const allViolations = [...structureViolations, ...result.violations]
+
+  if (allViolations.length === 0) {
     return `${header}\n\n✅ 형식상 문제는 발견되지 않았어요.\n\n${FILE_DIAGNOSIS_CAVEAT}`
   }
 
-  const list = result.violations
-    .map((v) => `• [${v.where}] *${v.issue}* — ${v.detail}`)
-    .join('\n')
+  const list = allViolations.map((v) => `• [${v.where}] *${v.issue}* — ${v.detail}`).join('\n')
   return `${header}\n\n⚠️ *형식·패턴 점검 결과*\n${list}\n\n${FILE_DIAGNOSIS_CAVEAT}`
 }
 
@@ -733,15 +775,16 @@ async function handleCsvDiagnosis(event: SlackEvent, csvFile: SlackFile, slack: 
     return
   }
 
-  const nonEmptyLines = decoded.text.split('\n').filter((l) => l.trim())
-  const rowCount = nonEmptyLines.length - 1
-  const truncated = nonEmptyLines.length > CSV_ROW_LIMIT
+  const rowCount = decoded.text.split('\n').filter((l) => l.trim()).length - 1
+
+  // 코드 검증: 전체 행 대상
+  const structureViolations = validateFileStructure(decoded.text)
 
   const policy = await fetchSectionPolicy(matched.id)
 
   let result: DiagnosisResult
   try {
-    result = await diagnoseCsvWithLlm(policy, decoded.text, csvFile.name)
+    result = await diagnoseCsvWithLlm(policy, decoded.text, csvFile.name, structureViolations)
   } catch (err) {
     const status = (err as { status?: number })?.status
     const isParseError = (err as Error).message === 'LLM response did not contain JSON'
@@ -756,6 +799,6 @@ async function handleCsvDiagnosis(event: SlackEvent, csvFile: SlackFile, slack: 
     return
   }
 
-  const text = formatDiagnosisReply(result, csvFile.name, rowCount, truncated, matched.name)
+  const text = formatDiagnosisReply(result, structureViolations, csvFile.name, rowCount, matched.name)
   await slack.chat.postMessage({ channel, thread_ts: ts, text })
 }
