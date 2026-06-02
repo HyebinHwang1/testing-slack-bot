@@ -1,7 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { WebClient } from '@slack/web-api'
 import Anthropic from '@anthropic-ai/sdk'
-import * as XLSX from 'xlsx'
 import { verifySlackSignature } from '../_lib/slack-verify.js'
 import { sql, type Section } from '../_lib/db.js'
 
@@ -560,6 +559,7 @@ async function downloadAndDecodeCsv(
   // Excel 파일 → 첫 번째 시트를 CSV 텍스트로 변환
   if (isExcelFile(file)) {
     try {
+      const XLSX = await import('xlsx')
       const workbook = XLSX.read(arrayBuffer, { type: 'array' })
       const sheetName = workbook.SheetNames[0]
       if (!sheetName) {
