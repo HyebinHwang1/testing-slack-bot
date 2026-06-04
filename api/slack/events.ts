@@ -214,7 +214,7 @@ async function composeReply(question: string): Promise<string> {
     FROM sections
     WHERE is_deleted = FALSE
   `
-  const matched = await classifySection(question, sections)
+  const { section: matched, usage: classifyUsage } = await classifySection(question, sections)
   const { items, scoped } = await fetchKnowledge(matched?.id ?? null)
   console.log(
     `[reply] section=${matched?.name ?? '(none)'} curator=${matched?.curator_slack_id ?? '-'} items=${items.length} scoped=${scoped}`,
@@ -224,20 +224,22 @@ async function composeReply(question: string): Promise<string> {
 
   // 분류 실패 → 전역 KB로 best-effort 답변 + QA 라우팅
   if (!matched) {
-    const answer = await generateAnswerFromItems(question, items)
-    return `${header}\n\n${answer}\n\n${qaRoutingLine()}`
+    const { answer, usage: answerUsage } = await generateAnswerFromItems(question, items)
+    const totalUsage = { input: classifyUsage.input + answerUsage.input, output: classifyUsage.output + answerUsage.output }
+    return `${header}\n\n${answer}\n\n${qaRoutingLine()}\n${formatTokenLine(totalUsage)}`
   }
 
   // 분류 성공 + 답할 데이터 없음 (섹션 0건 + 전역 폴백도 0건) → 라우팅만
   if (items.length === 0) {
     const tag = matched.curator_slack_id ? curatorLine(matched) : qaRoutingLine()
-    return `${header}\n\n아직 이 주제에 저장된 답이 없어요. 스레드에서 답변을 정리한 뒤 \`@철수 저장해줘\`로 저장해 주세요.\n\n${tag}`
+    return `${header}\n\n아직 이 주제에 저장된 답이 없어요. 스레드에서 답변을 정리한 뒤 \`@철수 저장해줘\`로 저장해 주세요.\n\n${tag}\n${formatTokenLine(classifyUsage)}`
   }
 
   // 분류 성공 + 데이터 있음 → 답변 + 담당자 항상 태그(담당자 있으면)
-  const answer = await generateAnswerFromItems(question, items)
+  const { answer, usage: answerUsage } = await generateAnswerFromItems(question, items)
+  const totalUsage = { input: classifyUsage.input + answerUsage.input, output: classifyUsage.output + answerUsage.output }
   const tail = matched.curator_slack_id ? `\n\n${curatorLine(matched)}` : ''
-  return `${header}\n\n${answer}${tail}`
+  return `${header}\n\n${answer}${tail}\n${formatTokenLine(totalUsage)}`
 }
 
 // 담당자 안내 라인 (담당자가 등록된 섹션일 때)
@@ -265,12 +267,25 @@ function qaTag(): string {
   return `<@${raw}>`
 }
 
+type TokenUsage = { input: number; output: number }
+
+// claude-haiku-4-5: 입력 $0.80/1M, 출력 $4.00/1M
+const COST_PER_INPUT_TOKEN = 0.80 / 1_000_000
+const COST_PER_OUTPUT_TOKEN = 4.00 / 1_000_000
+
+function formatTokenLine(usage: TokenUsage): string {
+  const costUSD = usage.input * COST_PER_INPUT_TOKEN + usage.output * COST_PER_OUTPUT_TOKEN
+  const costStr = `$${costUSD.toFixed(6)}`
+  return `_🔢 입력 ${usage.input.toLocaleString()} / 출력 ${usage.output.toLocaleString()} tokens (${costStr})_`
+}
+
 // 등록된 섹션 목록 중 질문이 어느 섹션인지 Claude로 분류 (없으면 null)
 async function classifySection(
   question: string,
   sections: Section[],
-): Promise<Section | null> {
-  if (sections.length === 0) return null
+): Promise<{ section: Section | null; usage: TokenUsage }> {
+  const zero = { input: 0, output: 0 }
+  if (sections.length === 0) return { section: null, usage: zero }
 
   const sectionList = sections
     .map((s) => `- ${s.name}${s.description ? `: ${s.description}` : ''}`)
@@ -299,15 +314,16 @@ ${sectionList}
         },
       ],
     })
+    const usage = { input: completion.usage.input_tokens, output: completion.usage.output_tokens }
     const rawText = completion.content[0]?.type === 'text' ? completion.content[0].text : ''
     const jsonMatch = rawText.match(/\{[\s\S]*\}/)
-    if (!jsonMatch) return null
+    if (!jsonMatch) return { section: null, usage }
     const parsed = JSON.parse(jsonMatch[0]) as { section?: string | null }
-    if (!parsed.section) return null
-    return sections.find((s) => s.name === parsed.section) ?? null
+    if (!parsed.section) return { section: null, usage }
+    return { section: sections.find((s) => s.name === parsed.section) ?? null, usage }
   } catch (err) {
     console.error('classifySection error:', err)
-    return null
+    return { section: null, usage: zero }
   }
 }
 
@@ -414,7 +430,7 @@ async function handleSave(event: SlackEvent, slack: WebClient) {
     FROM sections
     WHERE is_deleted = FALSE
   `
-  const savedSection = await classifySection(qa.question, sectionsForSave)
+  const { section: savedSection } = await classifySection(qa.question, sectionsForSave)
   console.log(`[save] section=${savedSection?.name ?? '(none)'}`)
 
   // 3) DB INSERT
@@ -495,7 +511,7 @@ async function fetchKnowledge(
 async function generateAnswerFromItems(
   question: string,
   items: KnowledgeRow[],
-): Promise<string> {
+): Promise<{ answer: string; usage: TokenUsage }> {
   const knowledgeBase = items
     .map((i, idx) => `[${idx + 1}] Q: ${i.question}\nA: ${i.answer}`)
     .join('\n\n')
@@ -520,18 +536,20 @@ ${knowledgeBase || '(아직 저장된 항목 없음)'}
         },
       ],
     })
-    return completion.content[0]?.type === 'text'
+    const usage = { input: completion.usage.input_tokens, output: completion.usage.output_tokens }
+    const answer = completion.content[0]?.type === 'text'
       ? completion.content[0].text
       : '답변 생성에 실패했어요.'
+    return { answer, usage }
   } catch (err) {
     const status = (err as { status?: number })?.status
     if (status === 529 || status === 503) {
-      return '⏳ AI 서버가 잠시 혼잡합니다. 잠시 후 다시 시도해 주세요.'
+      return { answer: '⏳ AI 서버가 잠시 혼잡합니다. 잠시 후 다시 시도해 주세요.', usage: { input: 0, output: 0 } }
     } else if (status === 429) {
-      return '⏳ 잠시 후 다시 시도해주세요 (rate limit).'
+      return { answer: '⏳ 잠시 후 다시 시도해주세요 (rate limit).', usage: { input: 0, output: 0 } }
     } else {
       console.error('Claude API error:', err)
-      return '⚠️ 답변 생성 중 오류가 발생했어요.'
+      return { answer: '⚠️ 답변 생성 중 오류가 발생했어요.', usage: { input: 0, output: 0 } }
     }
   }
 }
@@ -807,7 +825,7 @@ async function handleCsvDiagnosis(event: SlackEvent, csvFile: SlackFile, slack: 
     SELECT id, name, description, curator_slack_id, curator_name, is_deleted, created_at, updated_at
     FROM sections WHERE is_deleted = FALSE
   `
-  const matched = await classifySection(question, sections)
+  const { section: matched } = await classifySection(question, sections)
   if (!matched) {
     await slack.chat.postMessage({
       channel,
