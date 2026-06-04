@@ -3,6 +3,8 @@ import { WebClient } from '@slack/web-api'
 import Anthropic from '@anthropic-ai/sdk'
 import { verifySlackSignature } from '../_lib/slack-verify.js'
 import { sql, type Section } from '../_lib/db.js'
+import { decideLookup, executeLookup } from '../_lib/lookup.js'
+import type { CustomerSummary } from '../_lib/zelda.js'
 
 const CLAUDE_MODEL = 'claude-haiku-4-5-20251001'
 
@@ -68,24 +70,74 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   if (body.type === 'event_callback') {
-    // 동일 event_id 재전송 무시 (Slack은 3초 내 응답 없으면 재시도)
     const eventId: string | undefined = body.event_id
-    if (eventId) {
-      if (processedEventIds.has(eventId)) {
-        return res.status(200).json({ ok: true })
-      }
-      processedEventIds.add(eventId)
-      if (processedEventIds.size > 200) {
-        processedEventIds.delete(processedEventIds.values().next().value)
-      }
+    // 이미 처리 완료된 이벤트면 무시 (Slack 재전송 디둡)
+    if (eventId && processedEventIds.has(eventId)) {
+      return res.status(200).json({ ok: true })
     }
-    await handleEvent(body.event).catch((err) => {
-      console.error('Event handler error:', err)
-    })
-    return res.status(200).json({ ok: true })
+    // 즉시 200 ack (Slack 3초 룰) — 실제 처리는 백그라운드에서.
+    // LLM 콜 + 외부 API가 들어가면 동기로는 3초를 넘기므로 비동기가 정석.
+    res.status(200).json({ ok: true })
+    const event = body.event
+    scheduleBackground(
+      (async () => {
+        try {
+          await handleEvent(event)
+          // ★ 디둡 마킹은 "성공 후"에만 — 실패 시 미마킹 → Slack 재시도가 다시 처리 가능.
+          // (트레이드오프: 동시 중복 전송 시 이중 처리 가능. PoC 단일 인스턴스엔 허용.)
+          if (eventId) {
+            processedEventIds.add(eventId)
+            if (processedEventIds.size > 200) {
+              processedEventIds.delete(processedEventIds.values().next().value)
+            }
+          }
+        } catch (err) {
+          console.error('Event handler error:', err)
+          // 빈손 종료 금지(비동기판): 실패해도 무응답 0 — 해당 스레드에 라우팅 폴백.
+          await postRoutingFallback(event).catch((e) => console.error('fallback failed:', e))
+        }
+      })(),
+    )
+    return
   }
 
   return res.status(200).json({ ok: true })
+}
+
+// waitUntil: 응답을 보낸 뒤에도 백그라운드 Promise를 끝까지 살림 (서버리스 동결 방지).
+// @vercel/functions가 없으면 fire-and-forget로 degrade (vercel dev/로컬에선 그대로 완료됨).
+let waitUntilFn: ((p: Promise<unknown>) => void) | null = null
+let waitUntilTried = false
+function scheduleBackground(job: Promise<unknown>) {
+  if (waitUntilFn) {
+    waitUntilFn(job)
+    return
+  }
+  if (!waitUntilTried) {
+    waitUntilTried = true
+    // @ts-ignore - @vercel/functions는 선택 의존성 (없으면 fire-and-forget)
+    import('@vercel/functions')
+      .then((m) => {
+        waitUntilFn = (m as { waitUntil?: (p: Promise<unknown>) => void }).waitUntil ?? null
+        if (waitUntilFn) waitUntilFn(job)
+      })
+      .catch(() => {
+        /* 모듈 없음 → job은 이미 실행 중이므로 그대로 둠 */
+      })
+  }
+}
+
+// 백그라운드 처리 실패 시 무응답 방지용 라우팅 폴백 메시지 (빈손 종료 금지의 비동기판).
+async function postRoutingFallback(event: SlackEvent | undefined) {
+  const token = process.env.SLACK_BOT_TOKEN
+  if (!token || !event?.channel) return
+  if (event.type !== 'app_mention' && event.type !== 'message') return
+  const slack = new WebClient(token)
+  await slack.chat.postMessage({
+    channel: event.channel,
+    thread_ts: event.thread_ts ?? event.ts,
+    text: `⚠️ 처리 중 문제가 생겼어요. ${qaRoutingLine()}`,
+  })
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -207,7 +259,10 @@ async function handleAutoQuestion(event: SlackEvent, slack: WebClient) {
 
 // 섹션 분류 + (섹션 스코프) KB 답변 + 담당자/QA 태그를 합쳐 최종 답글 텍스트 생성 (멘션/자동 공용)
 // 분기 기준은 "섹션 매칭 여부"가 아니라 "답할 데이터가 있는가"
-async function composeReply(question: string): Promise<string> {
+async function composeReply(
+  question: string,
+  opts: { channelId?: string; allowLookup?: boolean } = {},
+): Promise<string> {
   const sections = await sql<Section[]>`
     SELECT id, name, description, curator_slack_id, curator_name,
            is_deleted, created_at, updated_at
@@ -215,31 +270,81 @@ async function composeReply(question: string): Promise<string> {
     WHERE is_deleted = FALSE
   `
   const { section: matched, usage: classifyUsage } = await classifySection(question, sections)
+  const usage: TokenUsage = { input: classifyUsage.input, output: classifyUsage.output }
+  const addUsage = (u: TokenUsage) => {
+    usage.input += u.input
+    usage.output += u.output
+  }
+  const header = `❓ *${question}*`
+
+  // ── 고객 조회 — 멘션 경로 + 단일 테스트 채널(SLACK_TARGET_CHANNEL_ID)에서만 (PII 가드)
+  const lookupChannel = process.env.SLACK_TARGET_CHANNEL_ID
+  const channelOk = !!lookupChannel && opts.channelId === lookupChannel
+  if (opts.allowLookup && channelOk) {
+    const { plan, usage: decideUsage } = await decideLookup(question, matched)
+    addUsage(decideUsage)
+    if (plan.needs_lookup) {
+      const tag = matched?.curator_slack_id ? curatorLine(matched) : qaRoutingLine()
+      const result = await executeLookup(plan.lookup)
+      if (result.status === 'hit') {
+        return `${header}\n\n${formatCustomer(result.data)}\n\n${tag}\n${formatTokenLine(usage)}`
+      }
+      if (result.status === 'error') console.error('executeLookup error:', result.reason)
+      const reason =
+        result.status === 'not_found'
+          ? '고객을 찾지 못했어요. 이메일이나 이름을 확인해 다시 알려주세요.'
+          : result.status === 'ambiguous'
+            ? `검색 결과가 여러 건(${result.count})이에요. 정확한 이메일 등 더 구체적인 정보를 알려주세요.`
+            : '지금 조회가 안 돼요. 잠시 후 다시 시도하거나 담당자에게 문의해 주세요.'
+      return `${header}\n\n${reason}\n\n${tag}\n${formatTokenLine(usage)}`
+    }
+  }
+
+  // ── 기존 KB 흐름
   const { items, scoped } = await fetchKnowledge(matched?.id ?? null)
   console.log(
-    `[reply] section=${matched?.name ?? '(none)'} curator=${matched?.curator_slack_id ?? '-'} items=${items.length} scoped=${scoped}`,
+    `[reply] section=${matched?.name ?? '(none)'} curator=${matched?.curator_slack_id ?? '-'} items=${items.length} scoped=${scoped} lookup=${opts.allowLookup && channelOk ? 'on' : 'off'}`,
   )
-
-  const header = `❓ *${question}*`
 
   // 분류 실패 → 전역 KB로 best-effort 답변 + QA 라우팅
   if (!matched) {
-    const { answer, usage: answerUsage } = await generateAnswerFromItems(question, items)
-    const totalUsage = { input: classifyUsage.input + answerUsage.input, output: classifyUsage.output + answerUsage.output }
-    return `${header}\n\n${answer}\n\n${qaRoutingLine()}\n${formatTokenLine(totalUsage)}`
+    const { answer, usage: answerUsage, ok } = await generateAnswerFromItems(question, items)
+    addUsage(answerUsage)
+    if (!ok) return `${header}\n\n${SYNTH_FAIL}\n\n${qaRoutingLine()}\n${formatTokenLine(usage)}`
+    return `${header}\n\n${answer}\n\n${qaRoutingLine()}\n${formatTokenLine(usage)}`
   }
 
   // 분류 성공 + 답할 데이터 없음 (섹션 0건 + 전역 폴백도 0건) → 라우팅만
   if (items.length === 0) {
     const tag = matched.curator_slack_id ? curatorLine(matched) : qaRoutingLine()
-    return `${header}\n\n아직 이 주제에 저장된 답이 없어요. 스레드에서 답변을 정리한 뒤 \`@철수 저장해줘\`로 저장해 주세요.\n\n${tag}\n${formatTokenLine(classifyUsage)}`
+    return `${header}\n\n아직 이 주제에 저장된 답이 없어요. 스레드에서 답변을 정리한 뒤 \`@철수 저장해줘\`로 저장해 주세요.\n\n${tag}\n${formatTokenLine(usage)}`
   }
 
-  // 분류 성공 + 데이터 있음 → 답변 + 담당자 항상 태그(담당자 있으면)
-  const { answer, usage: answerUsage } = await generateAnswerFromItems(question, items)
-  const totalUsage = { input: classifyUsage.input + answerUsage.input, output: classifyUsage.output + answerUsage.output }
+  // 분류 성공 + 데이터 있음 → 답변 + 담당자 태그(담당자 있으면). 합성 실패 시 라우팅 강등(폴백 단일원칙).
+  const { answer, usage: answerUsage, ok } = await generateAnswerFromItems(question, items)
+  addUsage(answerUsage)
+  if (!ok) {
+    const tag = matched.curator_slack_id ? curatorLine(matched) : qaRoutingLine()
+    return `${header}\n\n${SYNTH_FAIL}\n\n${tag}\n${formatTokenLine(usage)}`
+  }
   const tail = matched.curator_slack_id ? `\n\n${curatorLine(matched)}` : ''
-  return `${header}\n\n${answer}${tail}\n${formatTokenLine(totalUsage)}`
+  return `${header}\n\n${answer}${tail}\n${formatTokenLine(usage)}`
+}
+
+const SYNTH_FAIL = '지금 답변 생성이 안 돼요. 잠시 후 다시 시도하거나 담당자에게 문의해 주세요.'
+
+// 고객 조회 결과 — 결정적 템플릿(D1=b). LLM 미통과(환각 0, PII가 Anthropic에 안 감).
+// ⚠️ PoC: email/phone 등 PII를 그대로 노출. 운영 전환 시 마스킹 필요(스펙 §6).
+function formatCustomer(c: CustomerSummary): string {
+  return [
+    `👤 *고객 조회 결과*`,
+    `• 이름: ${c.display_name}`,
+    `• 이메일: ${c.email}`,
+    `• 전화: ${c.phone ?? '-'}`,
+    `• 코드: ${c.code}`,
+    `• 상태: ${c.status}${c.blocked ? ' (차단됨)' : ''}`,
+    `• 가입: ${c.created}`,
+  ].join('\n')
 }
 
 // 담당자 안내 라인 (담당자가 등록된 섹션일 때)
@@ -472,7 +577,8 @@ async function handleQuestion(event: SlackEvent, slack: WebClient) {
     return
   }
 
-  const text = await composeReply(question)
+  // 멘션 경로만 고객 조회 허용(D2=b). 자동응답(handleAutoQuestion)은 조회 비활성.
+  const text = await composeReply(question, { channelId: channel, allowLookup: true })
 
   await slack.chat.postMessage({
     channel,
@@ -511,7 +617,7 @@ async function fetchKnowledge(
 async function generateAnswerFromItems(
   question: string,
   items: KnowledgeRow[],
-): Promise<{ answer: string; usage: TokenUsage }> {
+): Promise<{ answer: string; usage: TokenUsage; ok: boolean }> {
   const knowledgeBase = items
     .map((i, idx) => `[${idx + 1}] Q: ${i.question}\nA: ${i.answer}`)
     .join('\n\n')
@@ -540,16 +646,16 @@ ${knowledgeBase || '(아직 저장된 항목 없음)'}
     const answer = completion.content[0]?.type === 'text'
       ? completion.content[0].text
       : '답변 생성에 실패했어요.'
-    return { answer, usage }
+    return { answer, usage, ok: true }
   } catch (err) {
     const status = (err as { status?: number })?.status
     if (status === 529 || status === 503) {
-      return { answer: '⏳ AI 서버가 잠시 혼잡합니다. 잠시 후 다시 시도해 주세요.', usage: { input: 0, output: 0 } }
+      return { answer: '⏳ AI 서버가 잠시 혼잡합니다. 잠시 후 다시 시도해 주세요.', usage: { input: 0, output: 0 }, ok: false }
     } else if (status === 429) {
-      return { answer: '⏳ 잠시 후 다시 시도해주세요 (rate limit).', usage: { input: 0, output: 0 } }
+      return { answer: '⏳ 잠시 후 다시 시도해주세요 (rate limit).', usage: { input: 0, output: 0 }, ok: false }
     } else {
       console.error('Claude API error:', err)
-      return { answer: '⚠️ 답변 생성 중 오류가 발생했어요.', usage: { input: 0, output: 0 } }
+      return { answer: '⚠️ 답변 생성 중 오류가 발생했어요.', usage: { input: 0, output: 0 }, ok: false }
     }
   }
 }
