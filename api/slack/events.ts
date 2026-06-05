@@ -293,9 +293,9 @@ async function composeReply(
       if (result.status === 'error') console.error('executeLookup error:', result.reason)
       const reason =
         result.status === 'not_found'
-          ? '고객을 찾지 못했어요. 이메일이나 이름을 확인해 다시 알려주세요.'
+          ? '찾지 못했어요. 검색어(이메일·이름·상품코드·주문번호 등)를 확인해 다시 알려주세요.'
           : result.status === 'ambiguous'
-            ? `검색 결과가 여러 건(${result.count})이에요. 정확한 이메일 등 더 구체적인 정보를 알려주세요.`
+            ? `검색 결과가 여러 건(${result.count})이에요. 더 구체적인 정보를 알려주세요.`
             : '지금 조회가 안 돼요. 잠시 후 다시 시도하거나 담당자에게 문의해 주세요.'
       return `${header}\n\n${reason}\n\n${tag}\n${formatTokenLine(usage)}`
     }
