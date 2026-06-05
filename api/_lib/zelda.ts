@@ -66,9 +66,9 @@ export async function getCustomer(id: number): Promise<CustomerSummary | null> {
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
-// 이름/이메일로 고객 검색. 서버 검색 파라미터(?search=) 사용 — 존재 여부는 착수 전 게이트(스펙 §9).
-// query는 인코딩해 파라미터 인젝션 방지. 이메일이면 정확 일치만 추려 ambiguous를 줄인다.
-// ⚠️ ?search= 미지원이면 첫 페이지(~50건)만 받으므로 대부분 못 찾아 not_found로 떨어진다(PoC 한계).
+// 로그인 ID(username)/이메일로 고객 검색. zelda ?search=는 username만 contains 매칭한다
+// (이름·code·id로는 검색 안 됨 — 2026-06-05 dev 실측, 스펙 §12.1). query는 인코딩해 인젝션 방지.
+// username이 이메일 형태면 이메일 정확 일치 필터로 ambiguous를 줄인다.
 export async function searchCustomers(query: string): Promise<CustomerSummary[]> {
   const q = query.trim()
   if (!q) return []
@@ -86,7 +86,7 @@ export async function searchCustomers(query: string): Promise<CustomerSummary[]>
 export interface ProductSummary {
   code: string
   name: string
-  price: number | null
+  price: number | string | null // zelda가 number 또는 "1000.00"(string)로 반환할 수 있어 둘 다 허용(order.payment_amount와 동일)
   selling: boolean
   display: boolean
   status: string | null
@@ -96,7 +96,7 @@ function pickProductFields(raw: Record<string, unknown>): ProductSummary {
   return {
     code: raw.code as string,
     name: raw.name as string,
-    price: (raw.price as number | null) ?? null,
+    price: (raw.price as number | string | null) ?? null,
     selling: Boolean(raw.selling),
     display: Boolean(raw.display),
     status: (raw.status as string | null) ?? null,

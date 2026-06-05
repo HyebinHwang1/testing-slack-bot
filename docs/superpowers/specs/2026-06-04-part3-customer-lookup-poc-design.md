@@ -23,7 +23,7 @@
 ## 1. 목표 / 비목표
 
 **목표**
-- 봇이 "고객 관련 질문"에서 **이메일/이름으로 고객을 조회**해 결정적으로 답하고, 조회 키를 못 얻거나 조회에 실패하면 **담당자/QA로 라우팅**한다.
+- 봇이 "고객 관련 질문"에서 **로그인 ID(username)/이메일로 고객을 조회**해 결정적으로 답하고, 조회 키를 못 얻거나 조회에 실패하면 **담당자/QA로 라우팅**한다. (이름 검색은 zelda API 미지원 — §12.1)
 - 이 흐름이 실제 인입에서 통하는지 **50건 실측 세트**로 측정해 "성공"을 처음으로 계측한다(PM 하드 트루스 #1 해소).
 - 조회 종류를 늘릴 수 있는 **디스패처 구조(B-1)** 를 세워 다음 사이클에 상품/주문 등으로 확장 가능하게 한다.
 
@@ -51,7 +51,7 @@
 ## 3. 합의된 결정
 
 1. 어드민 API 첫 예제 = **Zelda 고객 API**. Phase 1-core(ROUTER_ONLY) 대신 Phase 2 thin slice를 PoC로 먼저(의도적).
-2. 조회 키 = **이름/이메일 검색**(접근안 2).
+2. 조회 키 = **로그인 ID(username)/이메일 검색**(접근안 2). ※ 당초 "이름/이메일"이었으나 zelda API가 username만 검색 가능해 정정(§12.1, 2026-06-05).
 3. 아키텍처 = **B-1**: `classifySection`(유지) + `decideLookup`(신규 LLM 콜) + 합성. 콜 합치기(B-2) 안 함 — 측정 자산 보호 + 책임 분리.
 4. 3초 문제 = **비동기로 해결**(즉시 ack + `waitUntil`). 콜 수 줄이기 아님.
 5. PII = **PoC 전체 노출**, 단 §6의 가드·게이트 전제. 마스킹은 운영 전 팀 합의.
@@ -133,7 +133,7 @@ composeReply(question, channelId)                            // ★ channelId �
 export async function searchCustomers(query: string): Promise<CustomerSummary[]>
 //   서버 검색: GET /adminapi/v1/customer/?search={encodeURIComponent(query)}  (파라미터 존재 = §9 게이트)
 //   query는 화이트리스트 통과값만(이메일 정규식 / 길이·문자 제한). 인코딩 필수(파라미터 인젝션 방지).
-//   매칭: 이메일=정확 소문자 우선. 부분 일치 다수 → ambiguous로 강등.
+//   매칭: zelda ?search=는 username(로그인 ID) contains만(이름·code·id 불가, §12.1). 이메일 형태면 정확 소문자 우선. 부분 일치 다수 → ambiguous로 강등.
 //   서버 검색 파라미터가 없으면 폴백: 첫 페이지(~50건) 클라이언트 필터만. 전체 순회 금지.
 //     → 폴백은 모수가 작아 대부분 not_found→라우팅. 측정에서 "API 한계 라우팅"으로 별도 집계(§7).
 ```

@@ -86,8 +86,9 @@ async function runEval(goldenPath: string, label: string): Promise<void> {
         actualQuery = plan.lookup.params.query
         if (c.expected_needs_lookup) {
           typeCorrect = plan.lookup.type === c.expected_lookup_type
+          // 정확 일치(trim+소문자). includes는 추가 텍스트를 통과시켜 정확도를 과장하므로 ===로 검증.
           queryMatch = expectedQuery
-            ? plan.lookup.params.query.trim().toLowerCase().includes(expectedQuery.toLowerCase())
+            ? plan.lookup.params.query.trim().toLowerCase() === expectedQuery.trim().toLowerCase()
             : null
           const execResult = await executeLookup(plan.lookup)
           actualResultStatus = execResult.status
