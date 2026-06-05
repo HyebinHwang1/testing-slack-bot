@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { WebClient } from '@slack/web-api'
+import { waitUntil } from '@vercel/functions'
 import Anthropic from '@anthropic-ai/sdk'
 import { verifySlackSignature } from '../_lib/slack-verify.js'
 import { sql, type Section } from '../_lib/db.js'
@@ -106,25 +107,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 }
 
 // waitUntil: 응답을 보낸 뒤에도 백그라운드 Promise를 끝까지 살림 (서버리스 동결 방지).
-// @vercel/functions가 없으면 fire-and-forget로 degrade (vercel dev/로컬에선 그대로 완료됨).
-let waitUntilFn: ((p: Promise<unknown>) => void) | null = null
-let waitUntilTried = false
+// 정적 import로 요청 컨텍스트 안에서 동기 등록해야 vercel dev/프로덕션 모두에서 안정적이다.
+// (동적 import는 응답 반환 후 resolve되며 요청 컨텍스트를 벗어나 waitUntil 등록이 누락 → 백그라운드 이벤트 루프 동결.)
 function scheduleBackground(job: Promise<unknown>) {
-  if (waitUntilFn) {
-    waitUntilFn(job)
-    return
-  }
-  if (!waitUntilTried) {
-    waitUntilTried = true
-    // @ts-ignore - @vercel/functions는 선택 의존성 (없으면 fire-and-forget)
-    import('@vercel/functions')
-      .then((m) => {
-        waitUntilFn = (m as { waitUntil?: (p: Promise<unknown>) => void }).waitUntil ?? null
-        if (waitUntilFn) waitUntilFn(job)
-      })
-      .catch(() => {
-        /* 모듈 없음 → job은 이미 실행 중이므로 그대로 둠 */
-      })
+  try {
+    waitUntil(job)
+  } catch {
+    // 요청 컨텍스트 밖(로컬 스크립트/테스트 등) → job은 이미 실행 중이므로 그대로 둠
   }
 }
 
