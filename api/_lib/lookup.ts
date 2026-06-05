@@ -1,14 +1,14 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { type Section } from './db.js'
-import { searchCustomers, type CustomerSummary } from './zelda.js'
+import { searchCustomers, searchProducts, searchOrders, type CustomerSummary, type ProductSummary, type OrderSummary } from './zelda.js'
 
 const CLAUDE_MODEL = 'claude-haiku-4-5-20251001'
 
 export type TokenUsage = { input: number; output: number }
 
-// 조회 종류 화이트리스트. 확장: 'product_by_code' | 'order_by_number' ...
-export type LookupType = 'customer_search'
-const LOOKUP_TYPES: LookupType[] = ['customer_search']
+// 조회 종류 화이트리스트
+export type LookupType = 'customer_search' | 'product_by_code' | 'order_by_number'
+const LOOKUP_TYPES: LookupType[] = ['customer_search', 'product_by_code', 'order_by_number']
 
 // needs_lookup=true인데 lookup=null인 모순 상태를 타입으로 차단 (discriminated union)
 export type LookupPlan =
@@ -16,10 +16,38 @@ export type LookupPlan =
   | { needs_lookup: true; lookup: { type: LookupType; params: { query: string } } }
 
 export type LookupResult =
-  | { status: 'hit'; type: LookupType; data: CustomerSummary }
+  | { status: 'hit'; type: LookupType; data: CustomerSummary | ProductSummary | OrderSummary }
   | { status: 'not_found' }
   | { status: 'ambiguous'; count: number } // 2건 이상 — PII 덤프 회피, 이름/이메일 미포함
   | { status: 'error'; reason: string }
+
+// LLM 출력 텍스트 → 검증된 LookupPlan. enum 화이트리스트 강제(free-form 금지).
+export function parseLookupPlan(rawText: string): LookupPlan {
+  const match = rawText.match(/\{[\s\S]*\}/)
+  if (!match) return { needs_lookup: false }
+  let parsed: { needs_lookup?: boolean; lookup?: { type?: string; params?: { query?: string } } }
+  try {
+    parsed = JSON.parse(match[0])
+  } catch {
+    return { needs_lookup: false }
+  }
+  const type = parsed.lookup?.type
+  const query = typeof parsed.lookup?.params?.query === 'string' ? parsed.lookup.params.query.trim() : ''
+  if (!parsed.needs_lookup || !type || !LOOKUP_TYPES.includes(type as LookupType) || !query) {
+    return { needs_lookup: false }
+  }
+  return { needs_lookup: true, lookup: { type: type as LookupType, params: { query } } }
+}
+
+// 검색 결과 개수 → 결정적 status. 0=not_found, ≥2=ambiguous(PII 덤프 회피), 1=hit.
+export function toLookupResult(
+  type: LookupType,
+  results: Array<CustomerSummary | ProductSummary | OrderSummary>,
+): LookupResult {
+  if (results.length === 0) return { status: 'not_found' }
+  if (results.length >= 2) return { status: 'ambiguous', count: results.length }
+  return { status: 'hit', type, data: results[0] }
+}
 
 // ① 계획 — "조회가 필요한가? 필요하면 어떤 종류·검색어인가"를 LLM이 판단 (classifySection과 직교)
 export async function decideLookup(
