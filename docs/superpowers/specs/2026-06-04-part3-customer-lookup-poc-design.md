@@ -286,7 +286,7 @@ export async function executeLookup(
 |---|---|---|---|---|
 | `customer_search` (기존) | `/adminapi/v1/customer/?search=` | email/이름/phone contains | display_name, email, phone, status, blocked, code, created | email/phone |
 | `product_by_code` (신규) | `/adminapi/v1/product/?search=` | search_fields(code, custom_code, name…) | code, custom_code, name, price, selling, display | **없음** |
-| `order_by_number` (신규) | `/adminapi/v1/order/?search=` | search_fields(code, customer__email…) | **code, paid_status, shipping_status, claim/환불 status, 금액, created** | **없음(아래 D3)** |
+| `order_by_number` (신규) | `/adminapi/v1/order/?search=` | search_fields(code, customer__email…) | **code, ordered, paid, payment_amount, payment_method, item_statuses** | **없음(아래 D3)** |
 
 ### 12.2 결정 (D3 — order 출력 화이트리스트)
 - **D3 = (A) 상태 필드만.** order 응답에 `customer_email / receiver_phone / receiver_address`가 있으나 **노출하지 않는다.** 실측 주문 질문은 결제완료/환불/반품 *상태* 확인이라 고객 PII 불필요. → 신규 2종은 PII-청정(`product`=원천 없음, `order`=상태필드만). PII 보유는 `customer_search`로 격리 유지.
@@ -294,8 +294,10 @@ export async function executeLookup(
 ### 12.3 컴포넌트 변경
 **`zelda.ts`** — 래퍼 2개 추가(customer와 동일 `?search=`+인코딩 패턴):
 ```ts
-export interface ProductSummary { code; custom_code; name; price; selling; display }
-export interface OrderSummary   { code; paid_status; shipping_status; claim_status; amount; created } // D3: PII 제외
+export interface ProductSummary { code; name; price; selling; display; status }   // SimplestProductSerializer
+export interface OrderSummary   { code; ordered; paid; payment_amount; payment_method; item_statuses } // SimpleAdminOrderSerializer, D3: 고객 PII 제외
+// 주: order 'paid'는 결제완료 datetime|null → Boolean() 강제변환(결제완료 여부). item_statuses = orderitem_set[].status.
+//     '?search='의 list 직렬화는 product=SimplestProductSerializer, order=SimpleAdminOrderSerializer 기준.
 export async function searchProducts(query: string): Promise<ProductSummary[]>
 export async function searchOrders(query: string): Promise<OrderSummary[]>
 // 각자 pickXFields 화이트리스트. 실제 serializer 필드명은 구현 시 확정(ProductSerializer/OrderSerializer).
