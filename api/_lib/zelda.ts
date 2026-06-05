@@ -21,6 +21,13 @@ interface CustomerListResponse {
   results: Record<string, unknown>[]
 }
 
+// 공통 list 응답(raw 행). pickXFields가 노출 필드로 좁힌다.
+interface ZeldaListResponse {
+  next: string | null
+  previous: string | null
+  results: Record<string, unknown>[]
+}
+
 async function zeldaFetch<T>(path: string): Promise<T> {
   const baseUrl = process.env.ZELDA_API_URL
   const token = process.env.ZELDA_API_TOKEN
