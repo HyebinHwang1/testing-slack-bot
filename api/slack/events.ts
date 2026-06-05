@@ -4,7 +4,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { verifySlackSignature } from '../_lib/slack-verify.js'
 import { sql, type Section } from '../_lib/db.js'
 import { decideLookup, executeLookup } from '../_lib/lookup.js'
-import type { CustomerSummary } from '../_lib/zelda.js'
+import { formatLookupHit } from '../_lib/format.js'
 
 const CLAUDE_MODEL = 'claude-haiku-4-5-20251001'
 
@@ -288,7 +288,7 @@ async function composeReply(
       const tag = matched?.curator_slack_id ? curatorLine(matched) : qaRoutingLine()
       const result = await executeLookup(plan.lookup)
       if (result.status === 'hit') {
-        return `${header}\n\n${formatCustomer(result.data)}\n\n${tag}\n${formatTokenLine(usage)}`
+        return `${header}\n\n${formatLookupHit(result.type, result.data)}\n\n${tag}\n${formatTokenLine(usage)}`
       }
       if (result.status === 'error') console.error('executeLookup error:', result.reason)
       const reason =
@@ -333,20 +333,6 @@ async function composeReply(
 }
 
 const SYNTH_FAIL = '지금 답변 생성이 안 돼요. 잠시 후 다시 시도하거나 담당자에게 문의해 주세요.'
-
-// 고객 조회 결과 — 결정적 템플릿(D1=b). LLM 미통과(환각 0, PII가 Anthropic에 안 감).
-// ⚠️ PoC: email/phone 등 PII를 그대로 노출. 운영 전환 시 마스킹 필요(스펙 §6).
-function formatCustomer(c: CustomerSummary): string {
-  return [
-    `👤 *고객 조회 결과*`,
-    `• 이름: ${c.display_name}`,
-    `• 이메일: ${c.email}`,
-    `• 전화: ${c.phone ?? '-'}`,
-    `• 코드: ${c.code}`,
-    `• 상태: ${c.status}${c.blocked ? ' (차단됨)' : ''}`,
-    `• 가입: ${c.created}`,
-  ].join('\n')
-}
 
 // 담당자 안내 라인 (담당자가 등록된 섹션일 때)
 function curatorLine(section: Section): string {
