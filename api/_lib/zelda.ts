@@ -82,3 +82,33 @@ export async function searchCustomers(query: string): Promise<CustomerSummary[]>
   }
   return results
 }
+
+export interface ProductSummary {
+  code: string
+  name: string
+  price: number | null
+  selling: boolean
+  display: boolean
+  status: string | null
+}
+
+function pickProductFields(raw: Record<string, unknown>): ProductSummary {
+  return {
+    code: raw.code as string,
+    name: raw.name as string,
+    price: (raw.price as number | null) ?? null,
+    selling: Boolean(raw.selling),
+    display: Boolean(raw.display),
+    status: (raw.status as string | null) ?? null,
+  }
+}
+
+// 상품 검색. 자사상품코드/코드/이름 부분일치(zelda search_fields). 인코딩 필수.
+export async function searchProducts(query: string): Promise<ProductSummary[]> {
+  const q = query.trim()
+  if (!q) return []
+  const data = await zeldaFetch<ZeldaListResponse>(
+    `/adminapi/v1/product/?search=${encodeURIComponent(q)}`,
+  )
+  return data.results.map(pickProductFields)
+}
