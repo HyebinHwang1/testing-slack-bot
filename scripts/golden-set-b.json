@@ -1,0 +1,159 @@
+[
+  { "id": "r-01", "input": "반품 처리는 어떻게 하나요?", "category": "routing", "expected_needs_lookup": false },
+  { "id": "r-02", "input": "교환 정책이 어떻게 되나요?", "category": "routing", "expected_needs_lookup": false },
+  { "id": "r-03", "input": "배송 기간이 얼마나 걸리나요?", "category": "routing", "expected_needs_lookup": false },
+  { "id": "r-04", "input": "환불은 얼마나 걸리나요?", "category": "routing", "expected_needs_lookup": false },
+  { "id": "r-05", "input": "고객 등급 기준이 뭔가요?", "category": "routing", "expected_needs_lookup": false },
+  { "id": "r-06", "input": "결제 오류 처리 방법 알려줘", "category": "routing", "expected_needs_lookup": false },
+  { "id": "r-07", "input": "쿠폰 발급 방법이 어떻게 되나요?", "category": "routing", "expected_needs_lookup": false },
+  { "id": "r-08", "input": "사이즈 문의가 왔을 때 어떻게 답하나요?", "category": "routing", "expected_needs_lookup": false },
+  { "id": "r-09", "input": "어드민 비밀번호 변경은 어떻게 해요?", "category": "routing", "expected_needs_lookup": false },
+  { "id": "r-10", "input": "재고 관리는 어디서 하나요?", "category": "routing", "expected_needs_lookup": false },
+  {
+    "id": "c-01",
+    "input": "로그인 ID {{CUSTOMER_KEY}} 고객 계정 상태 확인해주세요",
+    "category": "customer_lookup",
+    "expected_needs_lookup": true,
+    "expected_lookup_type": "customer_search",
+    "expected_query": "{{CUSTOMER_KEY}}",
+    "expected_result_status": "hit",
+    "note": "username으로 hit. 실제 키는 .env.local의 EVAL_CUSTOMER_KEY에서 주입(PII 미커밋, 스펙 §5.4)"
+  },
+  {
+    "id": "c-02",
+    "input": "아이디 {{CUSTOMER_KEY}} 회원 blocked 여부 알려줘",
+    "category": "customer_lookup",
+    "expected_needs_lookup": true,
+    "expected_lookup_type": "customer_search",
+    "expected_query": "{{CUSTOMER_KEY}}",
+    "expected_result_status": "hit"
+  },
+  {
+    "id": "c-03",
+    "input": "{{CUSTOMER_KEY}} 계정 회원 정보 조회해줘",
+    "category": "customer_lookup",
+    "expected_needs_lookup": true,
+    "expected_lookup_type": "customer_search",
+    "expected_query": "{{CUSTOMER_KEY}}",
+    "expected_result_status": "hit"
+  },
+  {
+    "id": "c-04",
+    "input": "로그인 아이디 {{CUSTOMER_KEY}} 고객 주문 가능 상태인가요?",
+    "category": "customer_lookup",
+    "expected_needs_lookup": true,
+    "expected_lookup_type": "customer_search",
+    "expected_query": "{{CUSTOMER_KEY}}",
+    "expected_result_status": "hit"
+  },
+  {
+    "id": "c-05",
+    "input": "{{CUSTOMER_KEY}} 라는 아이디 가진 회원 있는지 확인해줘",
+    "category": "customer_lookup",
+    "expected_needs_lookup": true,
+    "expected_lookup_type": "customer_search",
+    "expected_query": "{{CUSTOMER_KEY}}",
+    "expected_result_status": "hit"
+  },
+  {
+    "id": "p-01",
+    "input": "JMFVFR1590 상품 판매 상태 알려줘",
+    "category": "product_lookup",
+    "expected_needs_lookup": true,
+    "expected_lookup_type": "product_by_code",
+    "expected_query": "JMFVFR1590",
+    "expected_result_status": "hit",
+    "note": "smoke test 확인"
+  },
+  {
+    "id": "p-02",
+    "input": "상품코드 JMFVFR1590 전시 여부 확인해줘",
+    "category": "product_lookup",
+    "expected_needs_lookup": true,
+    "expected_lookup_type": "product_by_code",
+    "expected_query": "JMFVFR1590",
+    "expected_result_status": "hit"
+  },
+  {
+    "id": "p-03",
+    "input": "JMFVFR1590 가격 얼마예요?",
+    "category": "product_lookup",
+    "expected_needs_lookup": true,
+    "expected_lookup_type": "product_by_code",
+    "expected_query": "JMFVFR1590",
+    "expected_result_status": "hit"
+  },
+  {
+    "id": "p-04",
+    "input": "JMFVFR1590 판매 중인가요?",
+    "category": "product_lookup",
+    "expected_needs_lookup": true,
+    "expected_lookup_type": "product_by_code",
+    "expected_query": "JMFVFR1590",
+    "expected_result_status": "hit"
+  },
+  {
+    "id": "p-05",
+    "input": "상품 JMFVFR1590 정보 알려줘",
+    "category": "product_lookup",
+    "expected_needs_lookup": true,
+    "expected_lookup_type": "product_by_code",
+    "expected_query": "JMFVFR1590",
+    "expected_result_status": "hit"
+  },
+  {
+    "id": "o-01",
+    "input": "주문번호 260602-BBD90F56B 결제 확인해줘",
+    "category": "order_lookup",
+    "expected_needs_lookup": true,
+    "expected_lookup_type": "order_by_number",
+    "expected_query": "260602-BBD90F56B",
+    "expected_result_status": "hit",
+    "note": "smoke test 확인"
+  },
+  {
+    "id": "o-02",
+    "input": "260602-BBD90F56B 주문 상태 어때요?",
+    "category": "order_lookup",
+    "expected_needs_lookup": true,
+    "expected_lookup_type": "order_by_number",
+    "expected_query": "260602-BBD90F56B",
+    "expected_result_status": "hit"
+  },
+  {
+    "id": "o-03",
+    "input": "260602-BBD90F56B 배송 어디까지 갔어요?",
+    "category": "order_lookup",
+    "expected_needs_lookup": true,
+    "expected_lookup_type": "order_by_number",
+    "expected_query": "260602-BBD90F56B",
+    "expected_result_status": "hit"
+  },
+  {
+    "id": "c-nf-01",
+    "input": "nobody@notexist.example.com 고객 조회해줘",
+    "category": "customer_lookup",
+    "expected_needs_lookup": true,
+    "expected_lookup_type": "customer_search",
+    "expected_query": "nobody@notexist.example.com",
+    "expected_result_status": "not_found"
+  },
+  {
+    "id": "p-nf-01",
+    "input": "ZZZNOTEXIST99 상품 정보 알려줘",
+    "category": "product_lookup",
+    "expected_needs_lookup": true,
+    "expected_lookup_type": "product_by_code",
+    "expected_query": "ZZZNOTEXIST99",
+    "expected_result_status": "not_found"
+  },
+  {
+    "id": "o-nf-01",
+    "input": "주문번호 000000-ZZZZFAKE 확인해줘",
+    "category": "order_lookup",
+    "expected_needs_lookup": true,
+    "expected_lookup_type": "order_by_number",
+    "expected_query": "000000-ZZZZFAKE",
+    "expected_result_status": "not_found"
+  }
+]
