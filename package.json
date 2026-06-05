@@ -21,6 +21,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.96.0",
     "@slack/web-api": "^7.16.0",
+    "@vercel/functions": "^3.6.2",
     "postgres": "^3.4.9",
     "xlsx": "^0.18.5"
   }

@@ -271,3 +271,52 @@ export async function executeLookup(
 - 감사 로깅(§6) — 운영 항목.
 
 **검증 한계:** 이 워크스페이스엔 node_modules 없음 → **컴파일/실행 검증 못 함**. 정독 리뷰만 수행. **houston에서 스모크 테스트 필수**(`pnpm install` 후 멘션→고객조회). 착수 전 게이트(§9: Zelda `?search=` 존재, 토큰 read-only, 단일 테스트 채널)는 미해소 상태.
+
+---
+
+## 12. 조회 종류 확장 — `product_by_code` + `order_by_number` (2026-06-05)
+
+### 12.0 배경 / 검증된 사실
+- **로컬 end-to-end 스모크 통과**(2026-06-05): chennai에서 `customer_search` hit→결정적 템플릿→Slack 게시 확인. 타입체크 strict 0에러. `@vercel/functions` 설치(waitUntil — vercel dev 동결 방지).
+- **게이트 해소**: `?search=`는 zelda `CustomerFilterSet.search`로 존재 확인. ZELDA는 **로컬 dev**(`localhost:8000`)라 토큰 read-only 게이트 N/A. 단일 테스트 채널 `SLACK_TARGET_CHANNEL_ID=C0B4HL61KGB` 설정.
+- **스코프 동기**: Gate 1 실측 조회키 = 상품코드 10·주문번호 3·고객식별 3 → 구현이 `customer_search`뿐이면 실인입 대부분 라우팅으로 떨어짐. 실측 상위 2개 키(상품·주문)를 커버해 디스패처를 실질화한다. **데이터는 로컬에 없을 수 있어 API 래퍼·디스패처 구조만 먼저** 깔고, 시드/eval은 이연.
+
+### 12.1 zelda 어드민 엔드포인트 매핑 (조사 결과)
+| lookup type | 엔드포인트 | 조회 | 노출 필드(화이트리스트) | PII |
+|---|---|---|---|---|
+| `customer_search` (기존) | `/adminapi/v1/customer/?search=` | email/이름/phone contains | display_name, email, phone, status, blocked, code, created | email/phone |
+| `product_by_code` (신규) | `/adminapi/v1/product/?search=` | search_fields(code, custom_code, name…) | code, custom_code, name, price, selling, display | **없음** |
+| `order_by_number` (신규) | `/adminapi/v1/order/?search=` | search_fields(code, customer__email…) | **code, paid_status, shipping_status, claim/환불 status, 금액, created** | **없음(아래 D3)** |
+
+### 12.2 결정 (D3 — order 출력 화이트리스트)
+- **D3 = (A) 상태 필드만.** order 응답에 `customer_email / receiver_phone / receiver_address`가 있으나 **노출하지 않는다.** 실측 주문 질문은 결제완료/환불/반품 *상태* 확인이라 고객 PII 불필요. → 신규 2종은 PII-청정(`product`=원천 없음, `order`=상태필드만). PII 보유는 `customer_search`로 격리 유지.
+
+### 12.3 컴포넌트 변경
+**`zelda.ts`** — 래퍼 2개 추가(customer와 동일 `?search=`+인코딩 패턴):
+```ts
+export interface ProductSummary { code; custom_code; name; price; selling; display }
+export interface OrderSummary   { code; paid_status; shipping_status; claim_status; amount; created } // D3: PII 제외
+export async function searchProducts(query: string): Promise<ProductSummary[]>
+export async function searchOrders(query: string): Promise<OrderSummary[]>
+// 각자 pickXFields 화이트리스트. 실제 serializer 필드명은 구현 시 확정(ProductSerializer/OrderSerializer).
+```
+
+**`lookup.ts`** — 멀티 타입:
+```ts
+export type LookupType = 'customer_search' | 'product_by_code' | 'order_by_number'
+// params는 {query: string} 통일 (타입별 분기 없음). LookupPlan discriminated union 유지.
+export type LookupResult =
+  | { status: 'hit'; type: LookupType; data: CustomerSummary | ProductSummary | OrderSummary }
+  | { status: 'not_found' } | { status: 'ambiguous'; count: number } | { status: 'error'; reason: string }
+// executeLookup: switch에 case 'product_by_code'→searchProducts, 'order_by_number'→searchOrders 추가.
+//   hit/not_found/ambiguous(≥2) 로직 재사용.
+```
+- `decideLookup` 프롬프트 개정: 이메일/사람이름→`customer_search`, 상품코드→`product_by_code`, 주문번호→`order_by_number`, 없으면 `needs_lookup:false`. 타입 enum 화이트리스트 강제. **모호/검증 실패 시 호출 안 하고 라우팅**(fail-safe 유지).
+
+**`events.ts`** — `formatProduct(p)` / `formatOrder(o)` 추가. `composeReply` hit 분기가 `result.type`로 포매터 선택(결정적 템플릿, D1 유지, LLM 미통과).
+
+### 12.4 비범위 / 이연
+- `settlement_invoice`, `partner_by_code` — 수요 좁고 사업자 PII → 다음 사이클.
+- URL링크에서 코드 추출(정규식) → 다음 사이클(우선 사용자가 코드/번호를 직접 적은 경우만).
+- 로컬 더미 상품/주문 시드 + eval 50건(§7) — lookup 확장 후 별도 단계.
+- 데이터 부재 시 동작: `not_found → 라우팅`(안전). 구조만 선반영.
