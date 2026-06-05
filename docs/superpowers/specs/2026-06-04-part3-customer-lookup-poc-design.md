@@ -285,7 +285,7 @@ export async function executeLookup(
 | lookup type | 엔드포인트 | 조회 | 노출 필드(화이트리스트) | PII |
 |---|---|---|---|---|
 | `customer_search` (기존) | `/adminapi/v1/customer/?search=` | email/이름/phone contains | display_name, email, phone, status, blocked, code, created | email/phone |
-| `product_by_code` (신규) | `/adminapi/v1/product/?search=` | search_fields(code, custom_code, name…) | code, custom_code, name, price, selling, display | **없음** |
+| `product_by_code` (신규) | `/adminapi/v1/product/?search=` | search_fields(code, custom_code, name…) | code, name, price, selling, display, status (※ list 직렬화에 custom_code 미포함) | **없음** |
 | `order_by_number` (신규) | `/adminapi/v1/order/?search=` | search_fields(code, customer__email…) | **code, ordered, paid, payment_amount, payment_method, item_statuses** | **없음(아래 D3)** |
 
 ### 12.2 결정 (D3 — order 출력 화이트리스트)
