@@ -21,5 +21,5 @@ test('formatOrder: 주문번호/결제완료/금액/품목상태, 고객 PII 없
 test('formatLookupHit: type별 포매터 선택', () => {
   assert.match(formatLookupHit('product_by_code', { code: 'P-1', name: 'n', price: 1, selling: true, display: true, status: null }), /상품 조회 결과/)
   assert.match(formatLookupHit('order_by_number', { code: 'O-1', ordered: null, paid: false, payment_amount: null, payment_method: null, item_statuses: [] }), /주문 조회 결과/)
-  assert.match(formatLookupHit('customer_search', { id: 1, display_name: '황혜빈', email: 'a@b.com', phone: null, status: 'unblock', blocked: false, code: 'c', created: 'd' }), /고객 조회 결과/)
+  assert.match(formatLookupHit('customer_search', { id: 1, display_name: '홍길동', email: 'a@b.com', phone: null, status: 'unblock', blocked: false, code: 'c', created: 'd' }), /고객 조회 결과/)
 })

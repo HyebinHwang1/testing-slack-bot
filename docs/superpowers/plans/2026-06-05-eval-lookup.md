@@ -41,7 +41,7 @@ type GoldenCase = {
 
 케이스 구성:
 - `routing` 10건: 조회 키 없는 정책/방법 질문
-- `customer_lookup` 5건: "황혜빈" hit (smoke test 확인)
+- `customer_lookup` 5건: `{{CUSTOMER_KEY}}`(로그인 ID, .env 주입) hit. ⚠️ zelda는 username만 검색 — 이름 검색 불가(§12.1)
 - `product_lookup` 5건: "JMFVFR1590" hit (smoke test 확인)
 - `order_lookup` 3건: "260602-BBD90F56B" hit (smoke test 확인)
 - `customer_lookup` 1건: 없는 이메일 not_found
@@ -62,11 +62,11 @@ type GoldenCase = {
   { "id": "r-08", "input": "사이즈 문의가 왔을 때 어떻게 답하나요?", "category": "routing", "expected_needs_lookup": false },
   { "id": "r-09", "input": "어드민 비밀번호 변경은 어떻게 해요?", "category": "routing", "expected_needs_lookup": false },
   { "id": "r-10", "input": "재고 관리는 어디서 하나요?", "category": "routing", "expected_needs_lookup": false },
-  { "id": "c-01", "input": "황혜빈 고객 계정 상태 확인해주세요", "category": "customer_lookup", "expected_needs_lookup": true, "expected_lookup_type": "customer_search", "expected_query": "황혜빈", "expected_result_status": "hit", "note": "smoke test 확인" },
-  { "id": "c-02", "input": "황혜빈님 blocked 여부 알려줘", "category": "customer_lookup", "expected_needs_lookup": true, "expected_lookup_type": "customer_search", "expected_query": "황혜빈", "expected_result_status": "hit" },
-  { "id": "c-03", "input": "황혜빈 회원 정보 조회해줘", "category": "customer_lookup", "expected_needs_lookup": true, "expected_lookup_type": "customer_search", "expected_query": "황혜빈", "expected_result_status": "hit" },
-  { "id": "c-04", "input": "황혜빈 고객 주문 가능 상태인가요?", "category": "customer_lookup", "expected_needs_lookup": true, "expected_lookup_type": "customer_search", "expected_query": "황혜빈", "expected_result_status": "hit" },
-  { "id": "c-05", "input": "황혜빈이라는 고객이 있는지 확인해줘", "category": "customer_lookup", "expected_needs_lookup": true, "expected_lookup_type": "customer_search", "expected_query": "황혜빈", "expected_result_status": "hit" },
+  { "id": "c-01", "input": "로그인 ID {{CUSTOMER_KEY}} 고객 계정 상태 확인해주세요", "category": "customer_lookup", "expected_needs_lookup": true, "expected_lookup_type": "customer_search", "expected_query": "{{CUSTOMER_KEY}}", "expected_result_status": "hit", "note": "username으로 hit. 실제 키는 .env.local의 EVAL_CUSTOMER_KEY 주입(PII 미커밋 §5.4)" },
+  { "id": "c-02", "input": "아이디 {{CUSTOMER_KEY}} 회원 blocked 여부 알려줘", "category": "customer_lookup", "expected_needs_lookup": true, "expected_lookup_type": "customer_search", "expected_query": "{{CUSTOMER_KEY}}", "expected_result_status": "hit" },
+  { "id": "c-03", "input": "{{CUSTOMER_KEY}} 계정 회원 정보 조회해줘", "category": "customer_lookup", "expected_needs_lookup": true, "expected_lookup_type": "customer_search", "expected_query": "{{CUSTOMER_KEY}}", "expected_result_status": "hit" },
+  { "id": "c-04", "input": "로그인 아이디 {{CUSTOMER_KEY}} 고객 주문 가능 상태인가요?", "category": "customer_lookup", "expected_needs_lookup": true, "expected_lookup_type": "customer_search", "expected_query": "{{CUSTOMER_KEY}}", "expected_result_status": "hit" },
+  { "id": "c-05", "input": "{{CUSTOMER_KEY}} 라는 아이디 가진 회원 있는지 확인해줘", "category": "customer_lookup", "expected_needs_lookup": true, "expected_lookup_type": "customer_search", "expected_query": "{{CUSTOMER_KEY}}", "expected_result_status": "hit" },
   { "id": "p-01", "input": "JMFVFR1590 상품 판매 상태 알려줘", "category": "product_lookup", "expected_needs_lookup": true, "expected_lookup_type": "product_by_code", "expected_query": "JMFVFR1590", "expected_result_status": "hit", "note": "smoke test 확인" },
   { "id": "p-02", "input": "상품코드 JMFVFR1590 전시 여부 확인해줘", "category": "product_lookup", "expected_needs_lookup": true, "expected_lookup_type": "product_by_code", "expected_query": "JMFVFR1590", "expected_result_status": "hit" },
   { "id": "p-03", "input": "JMFVFR1590 가격 얼마예요?", "category": "product_lookup", "expected_needs_lookup": true, "expected_lookup_type": "product_by_code", "expected_query": "JMFVFR1590", "expected_result_status": "hit" },
@@ -285,8 +285,8 @@ Slack MCP `slack_read_channel`로 `SLACK_TARGET_CHANNEL_ID=C0B4HL61KGB` 최근 �
 
 - [ ] **Step 2: 조회 케이스 키치환**
 
-실제 Slack 질문에 등장하는 주문번호/상품코드/고객이름이 로컬 zelda에 없을 수 있음.
-있는 키는 그대로, 없는 키는 로컬 실재 엔티티(황혜빈/JMFVFR1590/260602-BBD90F56B)로 치환.
+실제 Slack 질문에 등장하는 주문번호/상품코드/고객 로그인 ID가 로컬 zelda에 없을 수 있음.
+있는 키는 그대로, 없는 키는 로컬 실재 엔티티(고객=username `{{CUSTOMER_KEY}}` / 상품 JMFVFR1590 / 주문 260602-BBD90F56B)로 치환. ⚠️ 고객은 이름이 아니라 username으로만 검색됨(§12.1).
 `expected_result_status`는 치환 후 실제 API 결과로 확정.
 
 - [ ] **Step 3: eval 재실행**
