@@ -10,7 +10,8 @@
     "db:check": "tsx scripts/db-check.ts",
     "db:migrate": "tsx scripts/migrate.ts",
     "seed:exhibition": "tsx scripts/seed-exhibition.ts",
-    "test": "node --import tsx --test api/_lib/format.test.ts api/_lib/lookup.test.ts api/_lib/zelda.test.ts"
+    "test": "node --import tsx --test api/_lib/format.test.ts api/_lib/lookup.test.ts api/_lib/zelda.test.ts",
+    "eval": "tsx scripts/eval-lookup.ts"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",

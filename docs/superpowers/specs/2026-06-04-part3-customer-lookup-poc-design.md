@@ -284,7 +284,7 @@ export async function executeLookup(
 ### 12.1 zelda 어드민 엔드포인트 매핑 (조사 결과)
 | lookup type | 엔드포인트 | 조회 | 노출 필드(화이트리스트) | PII |
 |---|---|---|---|---|
-| `customer_search` (기존) | `/adminapi/v1/customer/?search=` | email/이름/phone contains | display_name, email, phone, status, blocked, code, created | email/phone |
+| `customer_search` (기존) | `/adminapi/v1/customer/?search=` | **username(로그인 ID) contains만** — 이름(display_name)·code·id로는 검색 불가(2026-06-05 dev 실측) | display_name, email, phone, status, blocked, code, created | email/phone |
 | `product_by_code` (신규) | `/adminapi/v1/product/?search=` | search_fields(code, custom_code, name…) | code, name, price, selling, display, status (※ list 직렬화에 custom_code 미포함) | **없음** |
 | `order_by_number` (신규) | `/adminapi/v1/order/?search=` | search_fields(code, customer__email…) | **code, ordered, paid, payment_amount, payment_method, item_statuses** | **없음(아래 D3)** |
 

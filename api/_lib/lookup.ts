@@ -66,7 +66,7 @@ export async function decideLookup(
           content: `당신은 Slack 봇의 "조회 계획" 단계다. 사용자 질문이 특정 대상을 시스템에서 조회해야 답할 수 있고, 질문에 그 대상을 찾을 검색어가 직접 들어있을 때만 조회를 계획한다.
 
 조회 종류(type) — 셋 중 하나만:
-- "customer_search": 특정 고객(회원). 검색어 = 질문에 등장한 이메일 또는 사람 이름.
+- "customer_search": 특정 고객(회원). 검색어 = 질문에 등장한 로그인 ID(username) 또는 이메일. (이름만으로는 조회 불가 — 사람 이름만 있고 ID/이메일이 없으면 needs_lookup=false)
 - "product_by_code": 특정 상품. 검색어 = 질문에 등장한 상품코드/자사상품코드(영문·숫자·하이픈 형태).
 - "order_by_number": 특정 주문. 검색어 = 질문에 등장한 주문번호.
 

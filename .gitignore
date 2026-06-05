@@ -14,3 +14,6 @@ web/dist
 
 # OS
 .DS_Store
+
+# eval 결과 산출물 (조회 결과·민감 데이터 포함 가능)
+scripts/eval-result-*.json
