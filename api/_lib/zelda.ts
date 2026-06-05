@@ -112,3 +112,37 @@ export async function searchProducts(query: string): Promise<ProductSummary[]> {
   )
   return data.results.map(pickProductFields)
 }
+
+export interface OrderSummary {
+  code: string
+  ordered: string | null
+  paid: boolean
+  payment_amount: number | string | null
+  payment_method: string | null
+  item_statuses: string[]
+}
+
+// D3=A: 주문 상태 필드만. customer_name/customer_object/email/phone 등 고객 PII는 의도적으로 읽지 않는다(누락=비노출).
+function pickOrderFields(raw: Record<string, unknown>): OrderSummary {
+  const items = Array.isArray(raw.orderitem_set)
+    ? (raw.orderitem_set as Array<Record<string, unknown>>)
+    : []
+  return {
+    code: raw.code as string,
+    ordered: (raw.ordered as string | null) ?? null,
+    paid: Boolean(raw.paid),
+    payment_amount: (raw.payment_amount as number | string | null) ?? null,
+    payment_method: (raw.payment_method as string | null) ?? null,
+    item_statuses: items.map((i) => i.status as string).filter(Boolean),
+  }
+}
+
+// 주문 검색. 주문번호(code) 등 부분일치(zelda search_fields). 인코딩 필수.
+export async function searchOrders(query: string): Promise<OrderSummary[]> {
+  const q = query.trim()
+  if (!q) return []
+  const data = await zeldaFetch<ZeldaListResponse>(
+    `/adminapi/v1/order/?search=${encodeURIComponent(q)}`,
+  )
+  return data.results.map(pickOrderFields)
+}
