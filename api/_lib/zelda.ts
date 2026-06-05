@@ -17,7 +17,8 @@ export interface CustomerSummary {
 interface CustomerListResponse {
   next: string | null
   previous: string | null
-  results: CustomerSummary[]
+  // 어드민 API가 돌려주는 raw 행. pickSafeFields가 노출 필드만 좁힌다.
+  results: Record<string, unknown>[]
 }
 
 async function zeldaFetch<T>(path: string): Promise<T> {

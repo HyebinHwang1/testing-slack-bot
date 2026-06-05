@@ -88,7 +88,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           if (eventId) {
             processedEventIds.add(eventId)
             if (processedEventIds.size > 200) {
-              processedEventIds.delete(processedEventIds.values().next().value)
+              const oldest = processedEventIds.values().next().value
+              if (oldest !== undefined) processedEventIds.delete(oldest)
             }
           }
         } catch (err) {
